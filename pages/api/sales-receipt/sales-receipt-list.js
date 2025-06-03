@@ -24,7 +24,6 @@ export default async function handler(req, res) {
   const session_id = "279d65da-6274-471b-be3c-63ba2e89a7a5";
   const host = "https://zeus.accurate.id";
 
-  // Ambil dari body meskipun GET (mirip Olsera)
   const { start_date, end_date, per_page } = req.body || {};
 
   // Siapkan parameter filter
@@ -50,7 +49,7 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "number,transDate,chequeDate,customer.name,bank.name,description,useCredit,totalPayment",
+          "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
