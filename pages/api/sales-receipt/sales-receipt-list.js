@@ -21,9 +21,10 @@ export default async function handler(req, res) {
   }
 
   const access_token = authHeader.split(" ")[1];
-  const session_id = "279d65da-6274-471b-be3c-63ba2e89a7a5";
+  const session_id = "2fc56017-5a49-441d-bbaa-06c2b0f50eee";
   const host = "https://zeus.accurate.id";
 
+  // Ambil dari body meskipun GET (mirip Olsera)
   const { start_date, end_date, per_page } = req.body || {};
 
   // Siapkan parameter filter
@@ -39,10 +40,6 @@ export default async function handler(req, res) {
     filterParams["sp.pageSize"] = per_page;
   }
 
-  // ⬇️ Tambahkan filter untuk deskripsi secara case-insensitive
-  filterParams["filter.description.op"] = "ILIKE";
-  filterParams["filter.description.val"] = "resto";
-
   try {
     const response = await axios({
       method: "get",
@@ -53,32 +50,23 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment,paymentMethod,cashierEmployeeName,detailInvoice",
+          "number,transDate,chequeDate,customer.name,bank.name,description,useCredit,totalPayment",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
     });
 
-    const orderedData = response.data.d.map((item) => {
-      const invoiceTotal = item.detailInvoice?.reduce(
-        (sum, detail) => sum + (detail.invoicePayment || 0),
-        0
-      );
-
-      return {
-        number: item.number,
-        transDate: item.transDate,
-        chequeDate: item.chequeDate,
-        customerName: item.customer?.name || "-",
-        bankName: item.bank?.name || "-",
-        description: item.description || "-",
-        useCredit: item.useCredit,
-        totalPayment: item.totalPayment,
-        paymentMethod: item.paymentMethod || "-",
-        cashierEmployeeName: item.cashierEmployeeName || "-",
-        invoicePayment: invoiceTotal || 0,
-      };
-    });
+    // 🔽 Mapping hasil agar tampil berurutan dan rapi
+    const orderedData = response.data.d.map((item) => ({
+      number: item.number,
+      transDate: item.transDate,
+      chequeDate: item.chequeDate,
+      customerName: item.customer?.name || "-",
+      bankName: item.bank?.name || "-",
+      description: item.description || "-",
+      useCredit: item.useCredit,
+      totalPayment: item.totalPayment,
+    }));
 
     return res.status(200).json({ orders: orderedData });
   } catch (error) {
