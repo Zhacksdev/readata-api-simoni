@@ -53,7 +53,7 @@ export default async function handler(req, res) {
         "sp.sort": "transDate|desc",
         ...filterParams,
 
-        "filter.description.op": "ILIKE",
+        "filter.description.op": "CONTAINS",
         "filter.description.val": "hotel",
       },
     });
