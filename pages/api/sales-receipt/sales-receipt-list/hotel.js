@@ -39,6 +39,10 @@ export default async function handler(req, res) {
     filterParams["sp.pageSize"] = per_page;
   }
 
+  // ⬇️ Tambahkan filter untuk deskripsi
+  filterParams["filter.description.op"] = "EQUALS";
+  filterParams["filter.description.val"] = "Hotel";
+
   try {
     const response = await axios({
       method: "get",
