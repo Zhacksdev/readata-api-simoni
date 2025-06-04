@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment",
+          "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment,paymentMethod", 
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
@@ -69,6 +69,7 @@ export default async function handler(req, res) {
         description: item.description || "-",
         useCredit: item.useCredit,
         totalPayment: item.totalPayment,
+        paymentMethod: item.paymentMethod,
       }));
 
     return res.status(200).json({ orders: orderedData });
