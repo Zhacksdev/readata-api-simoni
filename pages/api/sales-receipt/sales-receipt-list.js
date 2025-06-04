@@ -37,26 +37,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await axios.get(`${host}/accurate/api/sales-receipt/list.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: {
-        fields:
-          "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment,paymentMethod,cashierEmployeeName,detailInvoice",
-        "sp.sort": "transDate|desc",
-        ...filterParams,
-      },
-    });
+    const response = await axios.get(
+      `${host}/accurate/api/sales-receipt/list.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: {
+          fields:
+            "number,transDate,customer.name,bank.name,description,useCredit,totalPayment,detailInvoice.invoicePayment,paymentMethod,cashierEmployeeName",
+          "sp.sort": "transDate|desc",
+          ...filterParams,
+        },
+      }
+    );
 
     const orderedData = response.data.d.map((item) => {
-      // Total invoicePayment dari semua detailInvoice
-      const invoiceTotal = item.detailInvoice?.reduce(
-        (sum, detail) => sum + (detail.invoicePayment || 0),
-        0
-      );
-
       return {
         number: item.number,
         transDate: item.transDate,
@@ -66,9 +63,9 @@ export default async function handler(req, res) {
         description: item.description || "-",
         useCredit: item.useCredit,
         totalPayment: item.totalPayment,
-        paymentMethod: item.paymentMethod || "-",
+        paymentMethod: item.paymentMethod,
         cashierEmployeeName: item.cashierEmployeeName || "-",
-        invoicePayment: invoiceTotal || 0,
+        invoicePayment: item.detailInvoice?.[0]?.invoicePayment,
       };
     });
 
