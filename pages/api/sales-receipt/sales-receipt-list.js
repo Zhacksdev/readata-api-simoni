@@ -1,7 +1,6 @@
 // pages/api/order-list.js
 import axios from "axios";
 
-// Helper untuk konversi YYYY-MM-DD → DD/MM/YYYY
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
@@ -26,9 +25,7 @@ export default async function handler(req, res) {
 
   const { start_date, end_date, per_page } = req.body || {};
 
-  // Siapkan parameter filter
   const filterParams = {};
-
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
     filterParams["filter.transDate.val[0]"] = convertToDMY(start_date);
@@ -40,9 +37,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await axios({
-      method: "get",
-      url: `${host}/accurate/api/sales-receipt/list.do`,
+    const response = await axios.get(`${host}/accurate/api/sales-receipt/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
         "X-Session-ID": session_id,
@@ -55,20 +50,27 @@ export default async function handler(req, res) {
       },
     });
 
-    // 🔽 Mapping hasil agar tampil berurutan dan rapi
-    const orderedData = response.data.d.map((item) => ({
-      number: item.number,
-      transDate: item.transDate,
-      chequeDate: item.chequeDate,
-      customerName: item.customer?.name || "-",
-      bankName: item.bank?.name || "-",
-      description: item.description || "-",
-      useCredit: item.useCredit,
-      totalPayment: item.totalPayment,
-      paymentMethod: item.paymentMethod || "-",
-      cashierEmployeeName: item.cashierEmployeeName || "-",
-      invoicePayment: item.detailInvoice?.[0]?.invoicePayment || 0,
-    }));
+    const orderedData = response.data.d.map((item) => {
+      // Total invoicePayment dari semua detailInvoice
+      const invoiceTotal = item.detailInvoice?.reduce(
+        (sum, detail) => sum + (detail.invoicePayment || 0),
+        0
+      );
+
+      return {
+        number: item.number,
+        transDate: item.transDate,
+        chequeDate: item.chequeDate,
+        customerName: item.customer?.name || "-",
+        bankName: item.bank?.name || "-",
+        description: item.description || "-",
+        useCredit: item.useCredit,
+        totalPayment: item.totalPayment,
+        paymentMethod: item.paymentMethod || "-",
+        cashierEmployeeName: item.cashierEmployeeName || "-",
+        invoicePayment: invoiceTotal || 0,
+      };
+    });
 
     return res.status(200).json({ orders: orderedData });
   } catch (error) {
