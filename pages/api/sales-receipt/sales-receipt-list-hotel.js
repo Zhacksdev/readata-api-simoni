@@ -39,10 +39,6 @@ export default async function handler(req, res) {
     filterParams["sp.pageSize"] = per_page;
   }
 
-  // ⬇️ Tambahkan filter untuk deskripsi secara case-insensitive
-  filterParams["filter.description.op"] = "ILIKE";
-  filterParams["filter.description.val"] = "resto";
-
   try {
     const response = await axios({
       method: "get",
@@ -56,6 +52,9 @@ export default async function handler(req, res) {
           "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment,paymentMethod,cashierEmployeeName,detailInvoice",
         "sp.sort": "transDate|desc",
         ...filterParams,
+
+        "filter.description.op": "ILIKE",
+        "filter.description.val": "hotel",
       },
     });
 
