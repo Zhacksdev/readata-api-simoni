@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "number,transDate,chequeDate,customer.name,bank.name,description,useCredit,totalPayment",
+          "number,transDate,chequeDate,customer,bank,description,useCredit,totalPayment",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
