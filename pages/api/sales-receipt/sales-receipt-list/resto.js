@@ -39,9 +39,9 @@ export default async function handler(req, res) {
     filterParams["sp.pageSize"] = per_page;
   }
 
-  // ⬇️ Tambahkan filter untuk deskripsi
-  filterParams["filter.description.op"] = "EQUALS";
-  filterParams["filter.description.val"] = "Resto";
+  // ⬇️ Tambahkan filter untuk deskripsi secara case-insensitive
+  filterParams["filter.description.op"] = "ILIKE";
+  filterParams["filter.description.val"] = "resto";
 
   try {
     const response = await axios({
@@ -59,20 +59,26 @@ export default async function handler(req, res) {
       },
     });
 
-    // 🔽 Mapping hasil agar tampil berurutan dan rapi
-    const orderedData = response.data.d.map((item) => ({
-      number: item.number,
-      transDate: item.transDate,
-      chequeDate: item.chequeDate,
-      customerName: item.customer?.name || "-",
-      bankName: item.bank?.name || "-",
-      description: item.description || "-",
-      useCredit: item.useCredit,
-      totalPayment: item.totalPayment,
-      paymentMethod: item.paymentMethod || "-",
-      cashierEmployeeName: item.cashierEmployeeName || "-",
-      invoicePayment: item.detailInvoice?.invoicePayment || 0,
-    }));
+    const orderedData = response.data.d.map((item) => {
+      const invoiceTotal = item.detailInvoice?.reduce(
+        (sum, detail) => sum + (detail.invoicePayment || 0),
+        0
+      );
+
+      return {
+        number: item.number,
+        transDate: item.transDate,
+        chequeDate: item.chequeDate,
+        customerName: item.customer?.name || "-",
+        bankName: item.bank?.name || "-",
+        description: item.description || "-",
+        useCredit: item.useCredit,
+        totalPayment: item.totalPayment,
+        paymentMethod: item.paymentMethod || "-",
+        cashierEmployeeName: item.cashierEmployeeName || "-",
+        invoicePayment: invoiceTotal || 0,
+      };
+    });
 
     return res.status(200).json({ orders: orderedData });
   } catch (error) {
