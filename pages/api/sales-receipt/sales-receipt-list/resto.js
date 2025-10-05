@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   }
 
   const access_token = authHeader.split(" ")[1];
-  const session_id = "279d65da-6274-471b-be3c-63ba2e89a7a5";
+  const session_id = "0df81062-641d-42b2-b835-33aff8bb856c";
   const host = "https://zeus.accurate.id";
 
   // Ambil dari body meskipun GET (mirip Olsera)
