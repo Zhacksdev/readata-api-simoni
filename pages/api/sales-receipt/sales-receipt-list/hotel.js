@@ -21,8 +21,8 @@ export default async function handler(req, res) {
   }
 
   const access_token = authHeader.split(" ")[1];
-  const session_id = "0df81062-641d-42b2-b835-33aff8bb856c";
-  const host = "https://zeus.accurate.id";
+  const session_id = process.env.ACCURATE_SESSION_ID; // 👈 Diambil dari .env
+  const host = process.env.ACCURATE_HOST;           // 👈 Diambil dari .env (Disarankan untuk 308 fix)
 
   // Ambil dari body meskipun GET (mirip Olsera)
   const { start_date, end_date, per_page } = req.body || {};
