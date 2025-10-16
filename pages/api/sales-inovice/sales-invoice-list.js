@@ -43,20 +43,21 @@ export default async function handler(req, res) {
   try {
     const response = await axios({
       method: "get",
-      url: `${host}/accurate/api/sales-invoice/list.do`, // ✅ ubah endpoint sesuai kebutuhan
+      url: `${host}/accurate/api/sales-invoice/list.do`,
       headers: {
         Authorization: `Bearer ${access_token}`,
         "X-Session-ID": session_id,
       },
       params: {
         fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
+          // 🔽 Tambahkan tax1.description di fields agar ikut diambil
+          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1.description",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
     });
 
-    // 🔽 Mapping hasil agar tampil sesuai format baru
+    // 🔽 Mapping hasil agar tampil sesuai format baru + deskripsi pajak
     const orderedData = response.data.d.map((item) => ({
       id: item.id,
       number: item.number,
@@ -66,6 +67,7 @@ export default async function handler(req, res) {
       status: item.statusName || item.statusOutstanding || "-",
       age: item.age ?? "-",
       totalAmount: item.totalAmount ?? 0,
+      taxDescription: item.tax1?.description || "-", // ✅ Pajak utama faktur (contoh: "PAJAK RESTORAN")
     }));
 
     return res.status(200).json({ orders: orderedData });
