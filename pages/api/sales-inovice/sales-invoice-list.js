@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID; // 👈 Diambil dari .env
-  const host = process.env.ACCURATE_HOST; // 👈 Diambil dari .env (Disarankan untuk 308 fix)
+  const host = process.env.ACCURATE_HOST; // 👈 Diambil dari .env
 
   // Ambil dari body meskipun GET (mirip Olsera)
   const { start_date, end_date, per_page } = req.body || {};
@@ -50,14 +50,14 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          // 🔽 Tambahkan tax1.description di fields agar ikut diambil
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1.description",
+          // 🔽 pastikan tax1.description diminta eksplisit
+          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1,tax1.description",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
     });
 
-    // 🔽 Mapping hasil agar tampil sesuai format baru + deskripsi pajak
+    // 🔽 Mapping hasil agar tampil sesuai format baru + pajak utama faktur
     const orderedData = response.data.d.map((item) => ({
       id: item.id,
       number: item.number,
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       status: item.statusName || item.statusOutstanding || "-",
       age: item.age ?? "-",
       totalAmount: item.totalAmount ?? 0,
-      taxDescription: item.tax1?.description || "-", // ✅ Pajak utama faktur (contoh: "PAJAK RESTORAN")
+      pajak: item.tax1?.description || "-", // ✅ deskripsi pajak utama faktur (PAJAK RESTORAN)
     }));
 
     return res.status(200).json({ orders: orderedData });
