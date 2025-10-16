@@ -8,6 +8,31 @@ function convertToDMY(dateStr) {
   return `${day}/${month}/${year}`;
 }
 
+// Helper ambil detail faktur (untuk ambil pajak jika tidak ada di list)
+async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
+  try {
+    const res = await axios({
+      method: "get",
+      url: `${host}/accurate/api/sales-invoice/detail.do`,
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        "X-Session-ID": session_id,
+      },
+      params: { id },
+    });
+
+    const detail = res.data?.d || {};
+    return (
+      detail.tax1?.description ||
+      detail.detailTax?.[0]?.tax?.description ||
+      "-"
+    );
+  } catch (err) {
+    console.error(`Gagal ambil detail pajak ID ${id}:`, err.message);
+    return "-";
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Gunakan metode GET" });
@@ -41,6 +66,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 🔹 Ambil list faktur
     const response = await axios({
       method: "get",
       url: `${host}/accurate/api/sales-invoice/list.do`,
@@ -50,27 +76,45 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          // 🔽 pastikan tax1.description diminta eksplisit
           "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1,tax1.description",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
     });
 
-    // 🔽 Mapping hasil agar tampil berurutan dan rapi
-    const orderedData = response.data.d.map((item) => ({
-      id: item.id,
-      number: item.number,
-      transDate: item.transDate,
-      customerName: item.customer?.name || "-",
-      description: item.description || "-",
-      status: item.statusName || "-",
-      age: item.age || 0,
-      totalAmount: item.totalAmount,
-      // ambil deskripsi pajak utama faktur, fallback ke detailTax
-      pajak:
-        item.tax1?.description || item.detailTax?.[0]?.tax?.description || "-",
-    }));
+    const list = response.data.d || [];
+
+    // 🔹 Ambil pajak faktur (kalau tidak tersedia di list)
+    const orderedData = await Promise.all(
+      list.map(async (item) => {
+        let pajak =
+          item.tax1?.description ||
+          item.detailTax?.[0]?.tax?.description ||
+          "-";
+
+        // Kalau pajak belum ada → ambil detail faktur
+        if (pajak === "-") {
+          pajak = await fetchInvoiceTaxDetail(
+            host,
+            access_token,
+            session_id,
+            item.id
+          );
+        }
+
+        return {
+          id: item.id,
+          number: item.number,
+          transDate: item.transDate,
+          customerName: item.customer?.name || "-",
+          description: item.description || "-",
+          status: item.statusName || item.statusOutstanding || "-",
+          age: item.age || 0,
+          totalAmount: item.totalAmount,
+          pajak,
+        };
+      })
+    );
 
     return res.status(200).json({ orders: orderedData });
   } catch (error) {
