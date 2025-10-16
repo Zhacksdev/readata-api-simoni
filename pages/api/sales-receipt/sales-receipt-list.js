@@ -66,7 +66,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 🔹 Ambil daftar faktur
+    // 🔹 Ambil daftar faktur (hanya data dasar)
     const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
@@ -74,7 +74,7 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1,tax1.description,dppAmount,tax1Amount",
+          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
@@ -82,28 +82,16 @@ export default async function handler(req, res) {
 
     const list = response.data?.d || [];
 
-    // 🔹 Lengkapi data pajak bila belum ada di list
+    // 🔹 Ambil detail untuk setiap faktur untuk memastikan data pajak lengkap
     const result = await Promise.all(
       list.map(async (item) => {
-        let typePajak =
-          item.tax1?.description ||
-          item.detailTax?.[0]?.tax?.description ||
-          "-";
-        let dppAmount = item.dppAmount || 0;
-        let tax1Amount = item.tax1Amount || 0;
-
-        // Jika tidak ada pajak atau nilai masih kosong → ambil detail
-        if (typePajak === "-" || (!dppAmount && !tax1Amount)) {
-          const detail = await fetchInvoiceTaxDetail(
-            host,
-            access_token,
-            session_id,
-            item.id
-          );
-          typePajak = detail.typePajak;
-          dppAmount = detail.dppAmount;
-          tax1Amount = detail.tax1Amount;
-        }
+        // Langsung panggil fetchInvoiceTaxDetail untuk setiap item
+        const taxDetail = await fetchInvoiceTaxDetail(
+          host,
+          access_token,
+          session_id,
+          item.id
+        );
 
         return {
           id: item.id,
@@ -114,9 +102,9 @@ export default async function handler(req, res) {
           status: item.statusName || item.statusOutstanding || "-",
           umur: item.age || 0,
           total: item.totalAmount,
-          typePajak,
-          omzet: dppAmount, // Dasar Pengenaan Pajak
-          nilaiPPN: tax1Amount, // Nilai Pajak (PPN)
+          typePajak: taxDetail.typePajak,
+          omzet: taxDetail.dppAmount, // Dasar Pengenaan Pajak
+          nilaiPPN: taxDetail.tax1Amount, // Nilai Pajak (PPN)
         };
       })
     );
