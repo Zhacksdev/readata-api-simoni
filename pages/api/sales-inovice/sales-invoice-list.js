@@ -57,17 +57,19 @@ export default async function handler(req, res) {
       },
     });
 
-    // 🔽 Mapping hasil agar tampil sesuai format baru + pajak utama faktur
+    // 🔽 Mapping hasil agar tampil berurutan dan rapi
     const orderedData = response.data.d.map((item) => ({
       id: item.id,
       number: item.number,
       transDate: item.transDate,
       customerName: item.customer?.name || "-",
       description: item.description || "-",
-      status: item.statusName || item.statusOutstanding || "-",
-      age: item.age ?? "-",
-      totalAmount: item.totalAmount ?? 0,
-      pajak: item.tax1?.description || "-", // ✅ deskripsi pajak utama faktur (PAJAK RESTORAN)
+      status: item.statusName || "-",
+      age: item.age || 0,
+      totalAmount: item.totalAmount,
+      // ambil deskripsi pajak utama faktur, fallback ke detailTax
+      pajak:
+        item.tax1?.description || item.detailTax?.[0]?.tax?.description || "-",
     }));
 
     return res.status(200).json({ orders: orderedData });
