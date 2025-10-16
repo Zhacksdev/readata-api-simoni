@@ -22,14 +22,21 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     });
 
     const detail = res.data?.d || {};
-    return (
-      detail.tax1?.description ||
-      detail.detailTax?.[0]?.tax?.description ||
-      "-"
-    );
+    return {
+      typePajak:
+        detail.tax1?.description ||
+        detail.detailTax?.[0]?.tax?.description ||
+        "-",
+      dppAmount: detail.dppAmount || 0,
+      tax1Amount: detail.tax1Amount || 0,
+    };
   } catch (err) {
     console.error(`Gagal ambil detail pajak ID ${id}:`, err.message);
-    return "-";
+    return {
+      typePajak: "-",
+      dppAmount: 0,
+      tax1Amount: 0,
+    };
   }
 }
 
@@ -46,8 +53,8 @@ export default async function handler(req, res) {
   }
 
   const access_token = authHeader.split(" ")[1];
-  const session_id = process.env.ACCURATE_SESSION_ID; // 👈 Diambil dari .env
-  const host = process.env.ACCURATE_HOST; // 👈 Diambil dari .env
+  const session_id = process.env.ACCURATE_SESSION_ID;
+  const host = process.env.ACCURATE_HOST;
 
   // Ambil dari body meskipun GET (mirip Olsera)
   const { start_date, end_date, per_page } = req.body || {};
@@ -76,7 +83,8 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1,tax1.description",
+          // tambahkan dppAmount & tax1Amount untuk omzet dan nilai PPN
+          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1,tax1.description,dppAmount,tax1Amount",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
@@ -84,34 +92,41 @@ export default async function handler(req, res) {
 
     const list = response.data.d || [];
 
-    // 🔹 Ambil pajak faktur (kalau tidak tersedia di list)
+    // 🔹 Lengkapi data pajak jika belum tersedia
     const orderedData = await Promise.all(
       list.map(async (item) => {
-        let pajak =
+        let typePajak =
           item.tax1?.description ||
           item.detailTax?.[0]?.tax?.description ||
           "-";
+        let dppAmount = item.dppAmount || 0;
+        let tax1Amount = item.tax1Amount || 0;
 
-        // Kalau pajak belum ada → ambil detail faktur
-        if (pajak === "-") {
-          pajak = await fetchInvoiceTaxDetail(
+        // Jika data belum lengkap → ambil dari detail faktur
+        if (typePajak === "-" || (!dppAmount && !tax1Amount)) {
+          const detail = await fetchInvoiceTaxDetail(
             host,
             access_token,
             session_id,
             item.id
           );
+          typePajak = detail.typePajak;
+          dppAmount = detail.dppAmount;
+          tax1Amount = detail.tax1Amount;
         }
 
         return {
           id: item.id,
-          number: item.number,
-          transDate: item.transDate,
-          customerName: item.customer?.name || "-",
-          description: item.description || "-",
+          nomor: item.number,
+          tanggal: item.transDate,
+          pelanggan: item.customer?.name || "-",
+          deskripsi: item.description || "-",
           status: item.statusName || item.statusOutstanding || "-",
-          age: item.age || 0,
-          totalAmount: item.totalAmount,
-          pajak,
+          umur: item.age || 0,
+          total: item.totalAmount,
+          typePajak, // <- menggantikan 'pajak'
+          omzet: dppAmount, // Dasar Pengenaan Pajak
+          nilaiPPN: tax1Amount, // Nilai PPN
         };
       })
     );
