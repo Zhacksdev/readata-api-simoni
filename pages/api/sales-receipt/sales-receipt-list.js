@@ -60,12 +60,10 @@ export default async function handler(req, res) {
     const invoiceData = response.data?.d?.map((item) => {
       // Pajak
       const typePajak =
-        item?.tax1?.description ||
-        item?.detailItem?.[0]?.item?.tax1?.description ||
-        "NON-PAJAK";
+        item.searchCharField1.id || item.tax1.description || item.detailItem[0].item.tax1.description;
 
       // Omzet (DPP)
-      const dppAmount = Number(item?.taxableAmount1 ?? 0);
+      const dppAmount = Number(item.taxableAmount1);
 
       // PPN = 10% dari omzet
       const tax1Amount = Math.round(dppAmount * 0.1);
