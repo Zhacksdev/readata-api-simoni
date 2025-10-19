@@ -84,7 +84,7 @@ export default async function handler(req, res) {
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, per_page } = req.body || {};
+  const { start_date, end_date, per_page = 10000 } = req.body || {};
 
   const filterParams = {};
   if (start_date && end_date) {
