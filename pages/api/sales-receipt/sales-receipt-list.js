@@ -1,29 +1,4 @@
-if (dppAmount === 0 && Array.isArray(d.detailItem) && d.detailItem.length > 0) {
-      dppAmount = d.detailItem.reduce((sum, item) => {
-        const itemDpp =
-          Number(item.dppAmount) ||
-          Number(item.salesAmountBase) ||
-          Number(item.grossAmount) ||
-          0;
-        return sum + itemDpp;
-      }, 0);
-    }
-
-    // 🧾 Ambil Nilai PPN (Pajak Keluaran)
-    let tax1Amount = 0;
-    
-    if (d.tax1Amount) {
-      tax1Amount = Number(d.tax1Amount);
-    } else if (d.detailTax?.[0]?.taxAmount) {
-      tax1Amount = Number(d.detailTax[0].taxAmount);
-    }
-
-    if (tax1Amount === 0 && Array.isArray(d.detailItem) && d.detailItem.length > 0) {
-      tax1Amount = d.detailItem.reduce((sum, item) => {
-        const itemTax = Number(item.tax1Amount) || 0;
-        return sum + itemTax;
-      }, 0);
-    }// pages/api/order-list.js
+// pages/api/order-list.js
 import axios from "axios";
 
 function convertToDMY(dateStr) {
@@ -61,13 +36,40 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       d.detailItem?.[0]?.item?.tax1?.description ||
       (d.taxable === true ? "PPN" : "NON-PAJAK");
 
-    // DPP - akses langsung dari field utama
-    let dppAmount = Number(d.dppAmount) || 0;
-    console.log(`🔍 DPP untuk ID ${id}: dppAmount=${dppAmount}`);
+    // DPP - coba dari berbagai sumber
+    let dppAmount = 0;
+    
+    if (d.dppAmount && d.dppAmount > 0) {
+      dppAmount = d.dppAmount;
+    } else if (d.taxableAmount1 && d.taxableAmount1 > 0) {
+      dppAmount = d.taxableAmount1;
+    } else if (d.detailTax?.[0]?.taxableAmount && d.detailTax[0].taxableAmount > 0) {
+      dppAmount = d.detailTax[0].taxableAmount;
+    } else if (d.detailItem?.length > 0) {
+      // Jumlahkan dari detail item
+      dppAmount = d.detailItem.reduce((sum, item) => {
+        const itemDpp = item.dppAmount || item.salesAmountBase || item.grossAmount || 0;
+        return sum + Number(itemDpp);
+      }, 0);
+    } else if (d.salesAmountBase && d.salesAmountBase > 0) {
+      // Fallback ke salesAmountBase di level dokumen
+      dppAmount = d.salesAmountBase;
+    }
 
-    // PPN - akses langsung dari field utama
-    let tax1Amount = Number(d.tax1Amount) || 0;
-    console.log(`🔍 PPN untuk ID ${id}: tax1Amount=${tax1Amount}`);
+    // PPN - coba dari berbagai sumber
+    let tax1Amount = 0;
+    
+    if (d.tax1Amount && d.tax1Amount > 0) {
+      tax1Amount = d.tax1Amount;
+    } else if (d.detailTax?.[0]?.taxAmount && d.detailTax[0].taxAmount > 0) {
+      tax1Amount = d.detailTax[0].taxAmount;
+    } else if (d.detailItem?.length > 0) {
+      // Jumlahkan dari detail item
+      tax1Amount = d.detailItem.reduce((sum, item) => {
+        const itemTax = item.tax1Amount || 0;
+        return sum + Number(itemTax);
+      }, 0);
+    }
 
     return {
       typePajak: typePajak || "NON-PAJAK",
@@ -148,11 +150,7 @@ export default async function handler(req, res) {
       })
     );
 
-    return res.status(200).json({ 
-      success: true,
-      count: result.length,
-      orders: result 
-    });
+    return res.status(200).json({ orders: result });
   } catch (error) {
     console.error("💥 ERROR API:", error.response?.data || error.message);
     return res.status(error.response?.status || 500).json({
