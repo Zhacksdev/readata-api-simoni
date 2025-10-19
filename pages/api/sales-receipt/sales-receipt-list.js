@@ -28,16 +28,6 @@ async function retry(fn, retries = 3, delayMs = 400) {
   throw new Error("Max retries reached");
 }
 
-// 🔹 Normalisasi nama pajak (biar clean)
-function normalizeTaxType(type) {
-  if (!type) return "TIDAK ADA";
-  const upper = type.toUpperCase();
-  if (upper.includes("HOTEL")) return "HOTEL";
-  if (upper.includes("RESTO") || upper.includes("RESTORAN")) return "RESTORAN";
-  if (upper.includes("PPN")) return "PPN";
-  return "TIDAK ADA";
-}
-
 // Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
@@ -70,12 +60,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       Math.round(dppAmount * 0.1) ||
       0;
 
-    // 🧠 Normalisasi nama pajak sebelum return
-    return {
-      typePajak: normalizeTaxType(typePajak),
-      dppAmount,
-      tax1Amount,
-    };
+    return { typePajak, dppAmount, tax1Amount };
   });
 }
 
@@ -119,7 +104,7 @@ export default async function handler(req, res) {
     const list = response.data?.d || [];
 
     const result = [];
-    const batchSize = 5; // maksimal 5 request paralel biar aman
+    const batchSize = 5; // 🔹 maksimal 5 request paralel biar aman
 
     for (let i = 0; i < list.length; i += batchSize) {
       const batch = list.slice(i, i + batchSize);
@@ -142,7 +127,7 @@ export default async function handler(req, res) {
               status: item.statusName || item.statusOutstanding || "-",
               umur: item.age || 0,
               total: formatID(item.totalAmount),
-              typePajak: taxDetail.typePajak, // Sudah dinormalisasi
+              typePajak: taxDetail.typePajak,
               omzet: formatID(taxDetail.dppAmount),
               nilaiPPN: formatID(taxDetail.tax1Amount),
             };
@@ -157,7 +142,7 @@ export default async function handler(req, res) {
               status: item.statusName || item.statusOutstanding || "-",
               umur: item.age || 0,
               total: formatID(item.totalAmount),
-              typePajak: "TIDAK ADA",
+              typePajak: "Gagal Ambil Data",
               omzet: "0",
               nilaiPPN: "0",
             };
@@ -166,6 +151,8 @@ export default async function handler(req, res) {
       );
 
       result.push(...batchResults);
+
+      // ⏱ jeda sebelum batch berikutnya
       await delay(700);
     }
 
