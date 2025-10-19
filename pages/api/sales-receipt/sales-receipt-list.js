@@ -31,23 +31,23 @@ async function retry(fn, retries = 3, delayMs = 400) {
 // Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
-    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: { id },
-      timeout: 10000,
-    });
+    const res = await axios.get(
+      `${host}/accurate/api/sales-invoice/detail.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: { id },
+        timeout: 10000,
+      }
+    );
 
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
 
-    const typePajak =
-      d.searchCharField1.name ||
-      d.tax1?.description ||
-      d.detailTax?.[0]?.tax?.description ||
-      "NON-PAJAK";
+    const typePajak = d.tax1?.description || d.searchCharField1.name;
+    d.detailTax?.[0]?.tax?.description || "NON-PAJAK";
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -55,10 +55,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       Number(d.detailTax?.[0]?.taxableAmount) ||
       0;
 
-    const tax1Amount =
-      Number(d.tax1Amount) ||
-      Math.round(dppAmount * 0.1) ||
-      0;
+    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1) || 0;
 
     return { typePajak, dppAmount, tax1Amount };
   });
@@ -71,7 +68,9 @@ export default async function handler(req, res) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Access token tidak ditemukan di Header" });
+    return res
+      .status(401)
+      .json({ error: "Access token tidak ditemukan di Header" });
   }
 
   const access_token = authHeader.split(" ")[1];
@@ -88,18 +87,21 @@ export default async function handler(req, res) {
   if (per_page) filterParams["sp.pageSize"] = per_page;
 
   try {
-    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: {
-        fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
-        "sp.sort": "transDate|desc",
-        ...filterParams,
-      },
-    });
+    const response = await axios.get(
+      `${host}/accurate/api/sales-invoice/list.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: {
+          fields:
+            "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
+          "sp.sort": "transDate|desc",
+          ...filterParams,
+        },
+      }
+    );
 
     const list = response.data?.d || [];
 
