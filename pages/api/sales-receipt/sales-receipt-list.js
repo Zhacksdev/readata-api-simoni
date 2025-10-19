@@ -46,7 +46,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
 
-    const typePajakRaw = d.searchCharField1?.name ||
+    const typePajakRaw = d.searchCharField1 ||
       d.tax1?.description ||
       d.detailTax?.[0]?.tax?.description ||
       "NON-PAJAK";
