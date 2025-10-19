@@ -99,7 +99,7 @@ export default async function handler(req, res) {
     const list = response.data?.d || [];
 
     const result = await Promise.all(
-      list.map(async (item) => {
+      list.map(async (item, index) => {
         const taxDetail = await fetchInvoiceTaxDetail(
           host,
           access_token,
@@ -121,9 +121,9 @@ export default async function handler(req, res) {
           nilaiPPN: taxDetail.tax1Amount,
         };
 
-        // Tambahkan debug info untuk item pertama saja (untuk tidak terlalu besar)
-        if (item.id === list[0]?.id) {
-          orderData._debugFirstItem = taxDetail._debug;
+        // Tambahkan debug info untuk 2 item pertama
+        if (index < 2 && taxDetail._debug) {
+          orderData._debug = taxDetail._debug;
         }
 
         return orderData;
@@ -131,8 +131,10 @@ export default async function handler(req, res) {
     );
 
     return res.status(200).json({
+      success: true,
+      count: result.length,
       orders: result,
-      _info: "Debug info hanya untuk item pertama (lihat _debugFirstItem)",
+      _info: "Debug info ditampilkan untuk 2 item pertama",
     });
   } catch (error) {
     console.error("💥 ERROR API:", error.response?.data || error.message);
