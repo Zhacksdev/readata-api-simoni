@@ -43,7 +43,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
 
-    // Normalisasi type pajak agar seragam
+    // Normalisasi type pajak biar konsisten
     let rawType =
       d.searchCharField1?.name ||
       d.searchCharField1 ||
@@ -52,11 +52,10 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       "NON-PAJAK";
 
     if (typeof rawType !== "string") rawType = String(rawType);
-
     const typePajak = rawType
-      .replace(/PAJAK\s*/i, "") // hapus awalan "PAJAK"
+      .replace(/PAJAK\s*/i, "")
       .trim()
-      .toLowerCase(); // ubah jadi huruf kecil untuk dicocokkan
+      .toLowerCase();
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -85,17 +84,18 @@ export default async function handler(req, res) {
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, per_page = 10000 } = req.body || {};
+  const { start_date, end_date, page = 1, per_page = 10 } = req.body || {};
 
+  // 🔹 Filter tanggal
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
     filterParams["filter.transDate.val[0]"] = convertToDMY(start_date);
     filterParams["filter.transDate.val[1]"] = convertToDMY(end_date);
   }
-  if (per_page) filterParams["sp.pageSize"] = per_page;
 
   try {
+    // 🔹 Ambil semua data dulu (biar filter tidak terpotong pagination Accurate)
     const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
@@ -104,6 +104,7 @@ export default async function handler(req, res) {
       params: {
         fields:
           "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
+        "sp.pageSize": 10000, // ambil semua dulu
         "sp.sort": "transDate|desc",
         ...filterParams,
         _: Date.now(),
@@ -114,6 +115,7 @@ export default async function handler(req, res) {
     const result = [];
     const batchSize = 5;
 
+    // 🔹 Ambil detail per faktur
     for (let i = 0; i < list.length; i += batchSize) {
       const batch = list.slice(i, i + batchSize);
       const batchResults = await Promise.all(
@@ -126,10 +128,13 @@ export default async function handler(req, res) {
               item.id
             );
 
-            // ✅ Hanya ambil faktur bertipe RESTO / RESTORAN
+            // ✅ Hanya ambil faktur bertipe RESTO / RESTORAN (semua variasi)
             const t = taxDetail.typePajak;
             const isResto =
-              t.includes("resto") || t.includes("restoran");
+              t.includes("resto") ||
+              t.includes("restoran") ||
+              t.includes("pajak resto") ||
+              t.includes("pajak restoran");
 
             if (!isResto) return null;
 
@@ -152,15 +157,21 @@ export default async function handler(req, res) {
         })
       );
 
-      // simpan hasil valid
       result.push(...batchResults.filter(Boolean));
       await delay(700);
     }
 
+    // 🔹 Pagination setelah filter
+    const start = (page - 1) * per_page;
+    const end = start + per_page;
+    const paginated = result.slice(start, end);
+
     return res.status(200).json({
       success: true,
       total_data: result.length,
-      orders: result,
+      page: Number(page),
+      per_page: Number(per_page),
+      orders: paginated,
     });
   } catch (error) {
     console.error("💥 ERROR API:", error.response?.data || error.message);
