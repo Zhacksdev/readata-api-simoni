@@ -7,7 +7,7 @@ function convertToDMY(dateStr) {
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Ambil detail faktur untuk DPP, PPN, dan tipe pajak
+// 🔹 Ambil detail faktur (PAJAK & OMZET)
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   try {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -20,39 +20,15 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
 
     const d = res.data?.d || {};
 
-    // 🧩 Ambil tipe pajak dari field tax1.description (fallback ke detail lain)
-    const typePajak =
-      d.tax1?.description ||
-      d.detailTax?.[0]?.tax?.description ||
-      d.detailItem?.[0]?.item?.tax1?.description ||
-      (d.taxable ? "PPN" : "NON-PAJAK");
-
-    // 🧮 Ambil omzet (DPP)
-    let dppAmount =
-      Number(d.taxableAmount1) ||
-      Number(d.dppAmount) ||
-      Number(d.detailTax?.[0]?.taxableAmount) ||
-      0;
-
-    // Jika masih 0, akumulasi dari detail item
-    if (dppAmount === 0 && Array.isArray(d.detailItem) && d.detailItem.length > 0) {
-      dppAmount = d.detailItem.reduce((sum, item) => {
-        const itemDpp =
-          Number(item.dppAmount) ||
-          Number(item.salesAmountBase) ||
-          Number(item.grossAmount) ||
-          0;
-        return sum + itemDpp;
-      }, 0);
-    }
-
-    // 💰 Hitung nilai PPN = 10% dari omzet
-    const tax1Amount = Math.round(dppAmount * 0.1);
+    // Ambil langsung dari field utama
+    const typePajak = d.tax1?.description || "NON-PAJAK";
+    const dppAmount = Number(d.taxableAmount1) || 0;
+    const tax1Amount = Math.round(dppAmount * 0.1); // 10% dari omzet
 
     return {
-      typePajak: typePajak || "NON-PAJAK",
-      dppAmount: dppAmount || 0,
-      tax1Amount: tax1Amount || 0,
+      typePajak,
+      dppAmount,
+      tax1Amount,
     };
   } catch (err) {
     console.warn(`⚠️ Gagal ambil detail pajak ID ${id}:`, err.message);
@@ -115,7 +91,6 @@ export default async function handler(req, res) {
           item.id
         );
 
-        // Format angka ke format Indonesia
         const formatID = (num) => Number(num || 0).toLocaleString("id-ID");
 
         return {
