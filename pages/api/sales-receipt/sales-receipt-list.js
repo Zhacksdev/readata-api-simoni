@@ -1,6 +1,7 @@
+// pages/api/order-list.js
 import axios from "axios";
 
-// 🔹 Helper konversi tanggal YYYY-MM-DD → DD/MM/YYYY
+// Helper untuk konversi YYYY-MM-DD → DD/MM/YYYY
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
@@ -20,13 +21,13 @@ export default async function handler(req, res) {
   }
 
   const access_token = authHeader.split(" ")[1];
-  const session_id = process.env.ACCURATE_SESSION_ID; // dari .env
-  const host = process.env.ACCURATE_HOST; // dari .env
+  const session_id = process.env.ACCURATE_SESSION_ID; // 👈 Diambil dari .env
+  const host = process.env.ACCURATE_HOST;           // 👈 Diambil dari .env (Disarankan untuk 308 fix)
 
-  // Ambil filter dari body (meskipun GET)
+  // Ambil dari body meskipun GET (mirip Olsera)
   const { start_date, end_date, per_page } = req.body || {};
 
-  // 🔍 Filter tanggal dan page size
+  // Siapkan parameter filter
   const filterParams = {};
 
   if (start_date && end_date) {
@@ -40,7 +41,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 🧾 Ambil daftar faktur penjualan
     const response = await axios({
       method: "get",
       url: `${host}/accurate/api/sales-invoice/list.do`,
@@ -50,46 +50,30 @@ export default async function handler(req, res) {
       },
       params: {
         fields:
-          "id,number,transDate,customer,description,statusName,totalAmount,tax1,taxableAmount1",
+          "number,transDate,customer,statusName,statusOutstanding, totalAmount,totalPayment, searchCharField1, tax1.description, taxableAmount1",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
     });
 
-    // 🧮 Mapping data agar rapi dan mudah dibaca
-    const invoiceData = response.data?.d?.map((item) => {
-      // Pajak
-      const typePajak =
-        item.searchCharField1.id || item.tax1.description || item.detailItem[0].item.tax1.description;
+    // 🔽 Mapping hasil agar tampil berurutan dan rapi
+    const orderedData = response.data.d.map((item) => ({
+      nomor: item.number,
+      tanggal: item.transDate,
+      pelanggan: item.customer?.name || "-",
+      description: item.description || "-",
+      status: item.statusName || item.statusOutstanding || "-",
+      total: item.totalAmount,
+      type: item.searchCharField1 || item.tax1.description || "-",
+      omzet: item.taxableAmount1,
+      nilaiPPN: item.taxableAmount1 * 0.1
+    }));
 
-      // Omzet (DPP)
-      const dppAmount = Number(item.taxableAmount1);
-
-      // PPN = 10% dari omzet
-      const tax1Amount = Math.round(dppAmount * 0.1);
-
-      // Format angka ke format Indonesia
-      const formatID = (num) => Number(num || 0).toLocaleString("id-ID");
-
-      return {
-        id: item.id,
-        nomor: item.number,
-        tanggal: item.transDate,
-        pelanggan: item.customer?.name || "-",
-        deskripsi: item.description || "-",
-        status: item.statusName || "-",
-        total: formatID(item.totalAmount),
-        typePajak,
-        omzet: formatID(dppAmount),
-        nilaiPPN: formatID(tax1Amount),
-      };
-    });
-
-    return res.status(200).json({ success: true, orders: invoiceData });
+    return res.status(200).json({ orders: orderedData });
   } catch (error) {
-    console.error("💥 ERROR:", error.response?.data || error.message);
+    console.error("ERROR:", error.response?.data || error.message);
     return res.status(error.response?.status || 500).json({
-      error: error.response?.data || "Gagal mengambil data faktur penjualan",
+      error: error.response?.data || "Gagal mengambil data sales order",
     });
   }
 }
