@@ -28,7 +28,7 @@ async function retry(fn, retries = 3, delayMs = 400) {
   throw new Error("Max retries reached");
 }
 
-// Ambil detail faktur
+// 🔹 Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -43,11 +43,16 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
 
-    const typePajak =
+    // Normalisasi type pajak biar bersih dan konsisten
+    let rawType =
+      d.searchCharField1?.name ||
       d.searchCharField1 ||
       d.tax1?.description ||
       d.detailTax?.[0]?.tax?.description ||
       "NON-PAJAK";
+
+    if (typeof rawType !== "string") rawType = String(rawType);
+    const typePajak = rawType.replace(/PAJAK\s*/i, "").trim(); // hapus awalan “PAJAK ”
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -55,10 +60,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       Number(d.detailTax?.[0]?.taxableAmount) ||
       0;
 
-    const tax1Amount =
-      Number(d.tax1Amount) ||
-      Math.round(dppAmount * 0.1) ||
-      0;
+    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1) || 0;
 
     return { typePajak, dppAmount, tax1Amount };
   });
@@ -102,7 +104,6 @@ export default async function handler(req, res) {
     });
 
     const list = response.data?.d || [];
-
     const result = [];
     const batchSize = 5; // 🔹 maksimal 5 request paralel biar aman
 
@@ -127,7 +128,7 @@ export default async function handler(req, res) {
               status: item.statusName || item.statusOutstanding || "-",
               umur: item.age || 0,
               total: formatID(item.totalAmount),
-              typePajak: taxDetail.typePajak,
+              typePajak: taxDetail.typePajak, // ← sekarang pasti string: “Hotel” / “Resto”
               omzet: formatID(taxDetail.dppAmount),
               nilaiPPN: formatID(taxDetail.tax1Amount),
             };
@@ -142,7 +143,7 @@ export default async function handler(req, res) {
               status: item.statusName || item.statusOutstanding || "-",
               umur: item.age || 0,
               total: formatID(item.totalAmount),
-              typePajak: "Gagal Ambil Data",
+              typePajak: "NON-PAJAK",
               omzet: "0",
               nilaiPPN: "0",
             };
@@ -151,9 +152,7 @@ export default async function handler(req, res) {
       );
 
       result.push(...batchResults);
-
-      // ⏱ jeda sebelum batch berikutnya
-      await delay(700);
+      await delay(700); // jeda antar batch
     }
 
     return res.status(200).json({
