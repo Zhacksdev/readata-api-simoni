@@ -21,7 +21,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     const d = res.data?.d || {};
 
     // Ambil langsung dari field utama
-    const typePajak = d.tax1.description || d.detailItem[0].item.tax1.description;
+    const typePajak = d.searchCharField1.id || d.tax1.description || d.detailItem[0].item.tax1.description;
     const dppAmount = Number(d.taxableAmount1);
     const tax1Amount = Math.round(dppAmount * 0.1); // 10% dari omzet
 
