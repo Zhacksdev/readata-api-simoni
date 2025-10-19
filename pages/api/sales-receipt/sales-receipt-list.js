@@ -7,113 +7,89 @@ function convertToDMY(dateStr) {
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Ambil detail faktur (PAJAK & OMZET)
-async function fetchInvoiceTaxDetail(host, access_token, session_id) {
-  try {
-    const res = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-    });
-
-    const d = res.data?.d || {};
-
-    // Ambil langsung dari field utama
-    const typePajak = d.searchCharField1.id || d.tax1.description || d.detailItem[0].item.tax1.description;
-    const dppAmount = Number(d.taxableAmount1);
-    const tax1Amount = Math.round(dppAmount * 0.1); // 10% dari omzet
-
-    return {
-      typePajak,
-      dppAmount,
-      tax1Amount,
-    };
-  } catch (err) {
-
-  }
-}
-
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Gunakan metode GET" });
   }
 
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res
       .status(401)
       .json({ error: "Access token tidak ditemukan di Header" });
   }
 
   const access_token = authHeader.split(" ")[1];
-  const session_id = process.env.ACCURATE_SESSION_ID;
-  const host = process.env.ACCURATE_HOST;
+  const session_id = process.env.ACCURATE_SESSION_ID; // dari .env
+  const host = process.env.ACCURATE_HOST; // dari .env
+
+  // Ambil filter dari body (meskipun GET)
   const { start_date, end_date, per_page } = req.body || {};
 
   // 🔍 Filter tanggal dan page size
   const filterParams = {};
+
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
     filterParams["filter.transDate.val[0]"] = convertToDMY(start_date);
     filterParams["filter.transDate.val[1]"] = convertToDMY(end_date);
   }
+
   if (per_page) {
     filterParams["sp.pageSize"] = per_page;
   }
 
   try {
-    // 🧾 Ambil daftar faktur
-    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
+    // 🧾 Ambil daftar faktur penjualan
+    const response = await axios({
+      method: "get",
+      url: `${host}/accurate/api/sales-invoice/list.do`,
       headers: {
         Authorization: `Bearer ${access_token}`,
         "X-Session-ID": session_id,
       },
       params: {
         fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
+          "id,number,transDate,customer,description,statusName,totalAmount,tax1,taxableAmount1",
         "sp.sort": "transDate|desc",
         ...filterParams,
       },
     });
 
-    const list = response.data?.d || [];
+    // 🧮 Mapping data agar rapi dan mudah dibaca
+    const invoiceData = response.data?.d?.map((item) => {
+      // Pajak
+      const typePajak =
+        item?.tax1?.description ||
+        item?.detailItem?.[0]?.item?.tax1?.description ||
+        "NON-PAJAK";
 
-    // 🔁 Loop & ambil detail tiap faktur
-    const result = await Promise.all(
-      list.map(async (item) => {
-        const taxDetail = await fetchInvoiceTaxDetail(
-          host,
-          access_token,
-          session_id,
-          item.id
-        );
+      // Omzet (DPP)
+      const dppAmount = Number(item?.taxableAmount1 ?? 0);
 
-        const formatID = (num) => Number(num || 0).toLocaleString("id-ID");
+      // PPN = 10% dari omzet
+      const tax1Amount = Math.round(dppAmount * 0.1);
 
-        return {
-          id: item.id,
-          nomor: item.number,
-          tanggal: item.transDate,
-          pelanggan: item.customer?.name || "-",
-          deskripsi: item.description || "-",
-          status: item.statusName || item.statusOutstanding || "-",
-          umur: item.age || 0,
-          total: formatID(item.totalAmount),
-          typePajak: taxDetail.typePajak,
-          omzet: formatID(taxDetail.dppAmount),
-          nilaiPPN: formatID(taxDetail.tax1Amount),
-        };
-      })
-    );
+      // Format angka ke format Indonesia
+      const formatID = (num) => Number(num || 0).toLocaleString("id-ID");
 
-    return res.status(200).json({
-      success: true,
-      count: result.length,
-      orders: result,
+      return {
+        id: item.id,
+        nomor: item.number,
+        tanggal: item.transDate,
+        pelanggan: item.customer?.name || "-",
+        deskripsi: item.description || "-",
+        status: item.statusName || "-",
+        total: formatID(item.totalAmount),
+        typePajak,
+        omzet: formatID(dppAmount),
+        nilaiPPN: formatID(tax1Amount),
+      };
     });
+
+    return res.status(200).json({ success: true, orders: invoiceData });
   } catch (error) {
-    console.error("💥 ERROR API:", error.response?.data || error.message);
+    console.error("💥 ERROR:", error.response?.data || error.message);
     return res.status(error.response?.status || 500).json({
       error: error.response?.data || "Gagal mengambil data faktur penjualan",
     });
