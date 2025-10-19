@@ -1,14 +1,12 @@
 // pages/api/order-list.js
 import axios from "axios";
 
-// 🔹 Helper konversi tanggal YYYY-MM-DD → DD/MM/YYYY
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Helper ambil detail faktur (untuk ambil pajak dan nilai DPP/PPN)
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   try {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -21,40 +19,57 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
 
     const d = res.data?.d || {};
 
-    // 🔸 Ambil tipe pajak dari berbagai sumber
+    // Debug log untuk lihat struktur response
+    console.log(`📋 Detail untuk ID ${id}:`, {
+      hasDppAmount: !!d.dppAmount,
+      dppAmount: d.dppAmount,
+      hasTax1Amount: !!d.tax1Amount,
+      tax1Amount: d.tax1Amount,
+      detailItemCount: d.detailItem?.length || 0,
+      detailTaxCount: d.detailTax?.length || 0,
+    });
+
+    // Tipe pajak
     const typePajak =
       d.tax1?.description ||
       d.detailTax?.[0]?.tax?.description ||
       d.detailItem?.[0]?.item?.tax1?.description ||
-      d.detailItem?.[0]?.detailTax?.[0]?.tax?.description ||
-      (d.taxable ? "PAJAK HOTEL" : "NON-PAJAK");
+      (d.taxable === true ? "PPN" : "NON-PAJAK");
 
-    // 🔸 Ambil nilai DPP (dasar pengenaan pajak)
-    const dppAmount =
-      d.dppAmount ||
-      d.taxableAmount1 ||
-      d.detailTax?.[0]?.taxableAmount ||
-      (d.detailItem || []).reduce(
-        (sum, it) =>
-          sum +
-          (it.dppAmount ||
-            it.salesAmountBase ||
-            it.salesAmount ||
-            it.grossAmount ||
-            0),
-        0
-      ) ||
-      0;
+    // DPP - coba dari berbagai sumber
+    let dppAmount = 0;
+    
+    if (d.dppAmount && d.dppAmount > 0) {
+      dppAmount = d.dppAmount;
+    } else if (d.taxableAmount1 && d.taxableAmount1 > 0) {
+      dppAmount = d.taxableAmount1;
+    } else if (d.detailTax?.[0]?.taxableAmount && d.detailTax[0].taxableAmount > 0) {
+      dppAmount = d.detailTax[0].taxableAmount;
+    } else if (d.detailItem?.length > 0) {
+      // Jumlahkan dari detail item
+      dppAmount = d.detailItem.reduce((sum, item) => {
+        const itemDpp = item.dppAmount || item.salesAmountBase || item.grossAmount || 0;
+        return sum + Number(itemDpp);
+      }, 0);
+    } else if (d.salesAmountBase && d.salesAmountBase > 0) {
+      // Fallback ke salesAmountBase di level dokumen
+      dppAmount = d.salesAmountBase;
+    }
 
-    // 🔸 Ambil nilai pajak (PPN)
-    const tax1Amount =
-      d.tax1Amount ||
-      d.detailTax?.[0]?.taxAmount ||
-      (d.detailItem || []).reduce(
-        (sum, it) => sum + (it.tax1Amount || 0),
-        0
-      ) ||
-      0;
+    // PPN - coba dari berbagai sumber
+    let tax1Amount = 0;
+    
+    if (d.tax1Amount && d.tax1Amount > 0) {
+      tax1Amount = d.tax1Amount;
+    } else if (d.detailTax?.[0]?.taxAmount && d.detailTax[0].taxAmount > 0) {
+      tax1Amount = d.detailTax[0].taxAmount;
+    } else if (d.detailItem?.length > 0) {
+      // Jumlahkan dari detail item
+      tax1Amount = d.detailItem.reduce((sum, item) => {
+        const itemTax = item.tax1Amount || 0;
+        return sum + Number(itemTax);
+      }, 0);
+    }
 
     return {
       typePajak: typePajak || "NON-PAJAK",
@@ -67,7 +82,6 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   }
 }
 
-// 🔹 Handler utama API
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Gunakan metode GET" });
@@ -85,7 +99,6 @@ export default async function handler(req, res) {
   const host = process.env.ACCURATE_HOST;
   const { start_date, end_date, per_page } = req.body || {};
 
-  // 🔹 Siapkan filter tanggal & page size
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
@@ -97,7 +110,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 🔹 Ambil daftar faktur (data dasar)
     const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
@@ -113,7 +125,6 @@ export default async function handler(req, res) {
 
     const list = response.data?.d || [];
 
-    // 🔹 Lengkapi setiap faktur dengan data pajak (detail)
     const result = await Promise.all(
       list.map(async (item) => {
         const taxDetail = await fetchInvoiceTaxDetail(
@@ -133,8 +144,8 @@ export default async function handler(req, res) {
           umur: item.age || 0,
           total: item.totalAmount || 0,
           typePajak: taxDetail.typePajak,
-          omzet: taxDetail.dppAmount, // DPP
-          nilaiPPN: taxDetail.tax1Amount, // PPN
+          omzet: taxDetail.dppAmount,
+          nilaiPPN: taxDetail.tax1Amount,
         };
       })
     );
