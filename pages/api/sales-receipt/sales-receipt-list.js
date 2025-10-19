@@ -21,8 +21,8 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     const d = res.data?.d || {};
 
     // Ambil langsung dari field utama
-    const typePajak = d.tax1?.description || "NON-PAJAK";
-    const dppAmount = Number(d.taxableAmount1) || 0;
+    const typePajak = d.tax1.description || d.detailItem[0].item.tax1.description;
+    const dppAmount = Number(d.taxableAmount1);
     const tax1Amount = Math.round(dppAmount * 0.1); // 10% dari omzet
 
     return {
@@ -31,8 +31,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       tax1Amount,
     };
   } catch (err) {
-    console.warn(`⚠️ Gagal ambil detail pajak ID ${id}:`, err.message);
-    return { typePajak: "NON-PAJAK", dppAmount: 0, tax1Amount: 0 };
+    return { typePajak: "Gagal Ambil data", dppAmount: "-", tax1Amount: "-" };
   }
 }
 
