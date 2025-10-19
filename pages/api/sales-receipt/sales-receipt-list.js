@@ -8,14 +8,13 @@ function convertToDMY(dateStr) {
 }
 
 // 🔹 Ambil detail faktur (PAJAK & OMZET)
-async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
+async function fetchInvoiceTaxDetail(host, access_token, session_id) {
   try {
-    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
+    const res = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
         "X-Session-ID": session_id,
       },
-      params: { id },
     });
 
     const d = res.data?.d || {};
@@ -31,7 +30,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       tax1Amount,
     };
   } catch (err) {
-    return { typePajak: "Gagal Ambil data", dppAmount: "-", tax1Amount: "-" };
+
   }
 }
 
