@@ -8,7 +8,7 @@ function convertToDMY(dateStr) {
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Ambil detail faktur (Versi GABUNGAN v4 - Yang Benar)
+// 🔹 Ambil detail faktur (Versi GABUNGAN v5 - Perbaikan Final)
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   try {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -21,26 +21,23 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
 
     const d = res.data?.d || {};
     
-    // [OPSIONAL] Debug log
-    // console.log(`📋 Detail untuk ID ${id}:`, d);
-
-    // 1. 🧩 Ambil Tipe Pajak (LOGIKA KODE 1 - Paling Kuat)
-    // Menggunakan .find() untuk cek semua item
+    // 1. 🧩 Ambil Tipe Pajak (KEMBALI 100% KE LOGIKA KODE 1 - TERBAIK)
+    //    Menggunakan .find() DAN (d.taxable ? ...)
     const typePajak =
       d.tax1?.description ||
       d.detailTax?.[0]?.tax?.description ||
       d.detailItem?.find((i) => i.item?.tax1?.description)?.item.tax1.description ||
-      (d.taxable === true ? "PPN" : "NON-PAJAK");
+      (d.taxable ? "PPN" : "NON-PAJAK"); // ❗️ Ini adalah perbaikan dari Kode 4
 
-    // 2. 🧮 Ambil DPP (LOGIKA BERLAPIS YANG BENAR)
-    // Cek field utama dulu (dari Kode 1)
+    // 2. 🧮 Ambil DPP (LOGIKA BERLAPIS DARI KODE 4 - TERLENGKAP)
+    // Cek field utama dulu
     let dppAmount =
       Number(d.dppAmount) ||
       Number(d.taxableAmount1) ||
       Number(d.detailTax?.[0]?.taxableAmount) ||
       0;
 
-    // Jika masih 0, baru cek detailItem (dari Kode 1)
+    // Jika masih 0, cek akumulasi detailItem
     if (dppAmount === 0 && Array.isArray(d.detailItem) && d.detailItem.length > 0) {
       dppAmount = d.detailItem.reduce((sum, item) => {
         const itemDpp =
@@ -52,27 +49,25 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       }, 0);
     }
     
-    // Jika MASIH 0, baru cek fallback 'salesAmountBase' (tambahan dari Kode 2)
+    // Jika MASIH 0, cek fallback 'salesAmountBase' (tambahan dari Kode 2)
     if (dppAmount === 0 && d.salesAmountBase && Number(d.salesAmountBase) > 0) {
         dppAmount = Number(d.salesAmountBase);
     }
 
-    // 3. 🧾 Ambil Nilai PPN (LOGIKA BERLAPIS YANG BENAR)
-    // Cek field utama dulu (dari Kode 1)
+    // 3. 🧾 Ambil Nilai PPN (LOGIKA BERLAPIS DARI KODE 4)
+    // Cek field utama dulu
     let tax1Amount =
       Number(d.tax1Amount) ||
       Number(d.detailTax?.[0]?.taxAmount) ||
       0;
 
-    // Jika masih 0, baru cek detailItem (dari Kode 1)
+    // Jika masih 0, cek akumulasi detailItem
     if (tax1Amount === 0 && Array.isArray(d.detailItem) && d.detailItem.length > 0) {
       tax1Amount = d.detailItem.reduce((sum, item) => {
         const itemTax = Number(item.tax1Amount) || 0;
         return sum + itemTax;
       }, 0);
     }
-    
-    // (Tidak ada fallback lain untuk PPN saat ini)
 
     return {
       typePajak: typePajak || "NON-PAJAK",
@@ -86,7 +81,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
 }
 
 
-// 🛑 Handler API (SAMA SEPERTI KODE 1, 2, & 3)
+// 🛑 Handler API (SAMA, TIDAK PERLU DIUBAH)
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Gunakan metode GET" });
@@ -132,7 +127,7 @@ export default async function handler(req, res) {
 
     const result = await Promise.all(
       list.map(async (item) => {
-        // Ini akan memanggil 'fetchInvoiceTaxDetail' versi v4 yang sudah benar
+        // Ini akan memanggil 'fetchInvoiceTaxDetail' v5
         const taxDetail = await fetchInvoiceTaxDetail(
           host,
           access_token,
