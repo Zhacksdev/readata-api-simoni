@@ -31,14 +31,17 @@ async function retry(fn, retries = 3, delayMs = 400) {
 // 🔹 Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
-    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: { id },
-      timeout: 10000,
-    });
+    const res = await axios.get(
+      `${host}/accurate/api/sales-invoice/detail.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: { id },
+        timeout: 10000,
+      }
+    );
 
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
@@ -52,7 +55,11 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       "NON-PAJAK";
 
     if (typeof rawType !== "string") rawType = String(rawType);
-    const typePajak = rawType.replace(/PAJAK\s*/i, "").trim(); // hapus awalan “PAJAK ”
+    const typePajak = rawType
+      .replace(/PAJAK\s*/i, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase()); // hapus awalan “PAJAK ”
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -73,7 +80,9 @@ export default async function handler(req, res) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Access token tidak ditemukan di Header" });
+    return res
+      .status(401)
+      .json({ error: "Access token tidak ditemukan di Header" });
   }
 
   const access_token = authHeader.split(" ")[1];
@@ -90,18 +99,21 @@ export default async function handler(req, res) {
   if (per_page) filterParams["sp.pageSize"] = per_page;
 
   try {
-    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: {
-        fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
-        "sp.sort": "transDate|desc",
-        ...filterParams,
-      },
-    });
+    const response = await axios.get(
+      `${host}/accurate/api/sales-invoice/list.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: {
+          fields:
+            "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
+          "sp.sort": "transDate|desc",
+          ...filterParams,
+        },
+      }
+    );
 
     const list = response.data?.d || [];
     const result = [];
