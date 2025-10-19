@@ -1,43 +1,69 @@
-// pages/api/resto.js
 import axios from "axios";
 
-// Helper untuk konversi YYYY-MM-DD → DD/MM/YYYY
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
   return `${day}/${month}/${year}`;
 }
 
-// Helper ambil detail faktur (untuk ambil pajak & nilai jika tidak ada di list)
+function formatID(num) {
+  if (isNaN(num)) return "0";
+  return Number(num).toLocaleString("id-ID");
+}
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function retry(fn, retries = 3, delayMs = 400) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i < retries - 1) await delay(delayMs);
+    }
+  }
+  throw new Error("Max retries reached");
+}
+
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
-  try {
-    const res = await axios({
-      method: "get",
-      url: `${host}/accurate/api/sales-invoice/detail.do`,
+  return retry(async () => {
+    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
         "X-Session-ID": session_id,
       },
       params: { id },
+      timeout: 10000,
     });
 
-    const detail = res.data?.d || {};
-    return {
-      typePajak:
-        detail.tax1?.description ||
-        detail.detailTax?.[0]?.tax?.description ||
-        "-",
-      dppAmount: detail.dppAmount || 0,
-      tax1Amount: detail.tax1Amount || 0,
-    };
-  } catch (err) {
-    console.error(`Gagal ambil detail pajak ID ${id}:`, err.message);
-    return {
-      typePajak: "-",
-      dppAmount: 0,
-      tax1Amount: 0,
-    };
-  }
+    const d = res.data?.d;
+    if (!d) throw new Error("Empty response");
+
+    let rawType =
+      d.searchCharField1?.name ||
+      d.searchCharField1 ||
+      d.tax1?.description ||
+      d.detailTax?.[0]?.tax?.description ||
+      "NON-PAJAK";
+
+    if (typeof rawType !== "string") rawType = String(rawType);
+    rawType = rawType.trim().toUpperCase();
+
+    const typePajak = rawType.includes("HOTEL")
+      ? "Hotel"
+      : rawType.includes("RESTO") || rawType.includes("RESTORAN")
+      ? "Resto"
+      : "NON-PAJAK";
+
+    const dppAmount =
+      Number(d.taxableAmount1) ||
+      Number(d.dppAmount) ||
+      Number(d.detailTax?.[0]?.taxableAmount) ||
+      0;
+
+    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1) || 0;
+
+    return { typePajak, dppAmount, tax1Amount };
+  });
 }
 
 export default async function handler(req, res) {
@@ -46,99 +72,76 @@ export default async function handler(req, res) {
   }
 
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res
-      .status(401)
-      .json({ error: "Access token tidak ditemukan di Header" });
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Access token tidak ditemukan di Header" });
   }
 
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
 
-  // Ambil dari body meskipun GET (mirip Olsera)
-  const { start_date, end_date, per_page } = req.body || {};
-
-  const filterParams = {};
-
-  if (start_date && end_date) {
-    filterParams["filter.transDate.op"] = "BETWEEN";
-    filterParams["filter.transDate.val[0]"] = convertToDMY(start_date);
-    filterParams["filter.transDate.val[1]"] = convertToDMY(end_date);
-  }
-
-  if (per_page) {
-    filterParams["sp.pageSize"] = per_page;
-  }
-
   try {
-    // 🔹 Ambil list faktur
-    const response = await axios({
-      method: "get",
-      url: `${host}/accurate/api/sales-invoice/list.do`,
+    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
         "X-Session-ID": session_id,
       },
       params: {
         fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount,tax1,tax1.description,dppAmount,tax1Amount",
+          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
         "sp.sort": "transDate|desc",
-        ...filterParams,
       },
     });
 
-    const list = response.data.d || [];
+    const list = response.data?.d || [];
+    const result = [];
+    const batchSize = 5;
 
-    // 🔹 Lengkapi data pajak jika belum lengkap
-    const restoData = (
-      await Promise.all(
-        list.map(async (item) => {
-          let typePajak =
-            item.tax1?.description ||
-            item.detailTax?.[0]?.tax?.description ||
-            "-";
-          let dppAmount = item.dppAmount || 0;
-          let tax1Amount = item.tax1Amount || 0;
-
-          // Jika belum lengkap → ambil detail faktur
-          if (typePajak === "-" || (!dppAmount && !tax1Amount)) {
-            const detail = await fetchInvoiceTaxDetail(
+    for (let i = 0; i < list.length; i += batchSize) {
+      const batch = list.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(async (item) => {
+          try {
+            const taxDetail = await fetchInvoiceTaxDetail(
               host,
               access_token,
               session_id,
               item.id
             );
-            typePajak = detail.typePajak;
-            dppAmount = detail.dppAmount;
-            tax1Amount = detail.tax1Amount;
+
+            if (taxDetail.typePajak !== "Resto") return null; // ⬅️ otomatis filter Resto
+
+            return {
+              id: item.id,
+              nomor: item.number,
+              tanggal: item.transDate,
+              pelanggan: item.customer?.name || "-",
+              deskripsi: item.description || "-",
+              status: item.statusName || item.statusOutstanding || "-",
+              total: formatID(item.totalAmount),
+              typePajak: taxDetail.typePajak,
+              omzet: formatID(taxDetail.dppAmount),
+              nilaiPPN: formatID(taxDetail.tax1Amount),
+            };
+          } catch {
+            return null;
           }
-
-          return {
-            id: item.id,
-            nomor: item.number,
-            tanggal: item.transDate,
-            pelanggan: item.customer?.name || "-",
-            deskripsi: item.description || "-",
-            status: item.statusName || item.statusOutstanding || "-",
-            umur: item.age || 0,
-            total: item.totalAmount,
-            typePajak, // <- menggantikan 'pajak'
-            omzet: dppAmount, // Dasar Pengenaan Pajak
-            nilaiPPN: tax1Amount, // Nilai PPN
-          };
         })
-      )
-    ).filter((item) => (item.typePajak || "").toLowerCase().includes("resto"));
+      );
 
-    // 🔽 Kembalikan hanya data dengan pajak resto
-    return res.status(200).json({ orders: restoData });
+      result.push(...batchResults.filter(Boolean));
+      await delay(700);
+    }
+
+    res.status(200).json({
+      success: true,
+      total_data: result.length,
+      orders: result,
+    });
   } catch (error) {
-    console.error("ERROR:", error.response?.data || error.message);
-    return res.status(error.response?.status || 500).json({
-      error:
-        error.response?.data ||
-        "Gagal mengambil data sales invoice dengan pajak resto",
+    console.error("💥 ERROR RESTO:", error.response?.data || error.message);
+    res.status(500).json({
+      error: "Gagal mengambil data faktur Resto",
     });
   }
 }

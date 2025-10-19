@@ -138,7 +138,6 @@ export default async function handler(req, res) {
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              umur: item.age || 0,
               total: formatID(item.totalAmount),
               typePajak: taxDetail.typePajak, // ← sekarang pasti string: “Hotel” / “Resto”
               omzet: formatID(taxDetail.dppAmount),
