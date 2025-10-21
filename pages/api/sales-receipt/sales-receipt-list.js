@@ -1,11 +1,6 @@
 import axios from "axios";
 
 // 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (hanya untuk filter)
-function convertToDMY(dateStr) {
-  if (!dateStr) return null;
-  const [year, month, day] = dateStr.split("-");
-  return `${day}/${month}/${year}`;
-}
 
 // Delay helper (ms)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -84,8 +79,6 @@ export default async function handler(req, res) {
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
-    filterParams["filter.transDate.val[0]"] = convertToDMY(start_date);
-    filterParams["filter.transDate.val[1]"] = convertToDMY(end_date);
   }
   if (per_page) filterParams["sp.pageSize"] = per_page;
 
