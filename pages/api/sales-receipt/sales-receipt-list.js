@@ -1,18 +1,5 @@
 import axios from "axios";
 
-// Konversi tanggal YYYY-MM-DD → DD/MM/YYYY
-function convertToDMY(dateStr) {
-  if (!dateStr) return null;
-  const [year, month, day] = dateStr.split("-");
-  return `${day}/${month}/${year}`;
-}
-
-// Format angka ke format Indonesia
-function formatID(num) {
-  if (isNaN(num)) return "0";
-  return Number(num).toLocaleString("id-ID");
-}
-
 // Delay helper (ms)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
