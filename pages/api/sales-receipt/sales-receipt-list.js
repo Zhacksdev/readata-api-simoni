@@ -1,70 +1,23 @@
 import axios from "axios";
 
+// 🔹 Ubah format tanggal YYYY-MM-DD → DD/MM/YYYY (untuk filter ke Accurate)
+function convertToDMY(dateStr) {
+  if (!dateStr) return null;
+  const [year, month, day] = dateStr.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+// 🔹 Ubah format tanggal DD-MM-YYYY → YYYY-MM-DD (untuk response dari Accurate)
+function convertToYMD(dateStr) {
+  if (!dateStr) return dateStr;
+  const [day, month, year] = dateStr.split("-");
+  return `${year}-${month}-${day}`;
+}
+
 // Delay helper (ms)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Konversi dari YYYY-MM-DD -> DD/MM/YYYY (untuk filter Accurate)
-function convertToDMYFromISO(dateStr) {
-  if (!dateStr) return null;
-  // expect YYYY-MM-DD
-  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const [, y, mo, d] = m;
-  return `${d}/${mo}/${y}`;
-}
-
-// Normalisasi input filter date (terima YYYY-MM-DD atau DD-MM-YYYY atau DD/MM/YYYY)
-// Return string DD/MM/YYYY (suitable for Accurate filter) or null
-function normalizeFilterToAccurate(dateStr) {
-  if (!dateStr) return null;
-
-  // already in YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return convertToDMYFromISO(dateStr);
-  }
-
-  // dd-mm-yyyy or dd/mm/yyyy -> convert to dd/mm/yyyy
-  if (/^\d{2}[\/-]\d{2}[\/-]\d{4}$/.test(dateStr)) {
-    return dateStr.replace(/-/g, "/");
-  }
-
-  // try to guess yyyy/mm/dd
-  const alt = dateStr.replace(/\s+/g, "");
-  if (/^\d{4}[\/-]\d{2}[\/-]\d{2}$/.test(alt)) {
-    return convertToDMYFromISO(alt.replace(/\//g, "-"));
-  }
-
-  // unknown format -> return null
-  return null;
-}
-
-// Normalisasi tanggal dari Accurate (terima "dd-mm-yyyy", "dd/mm/yyyy", atau "yyyy-mm-dd")
-// Return YYYY-MM-DD
-function normalizeAccurateDateToISO(dateStr) {
-  if (!dateStr) return null;
-
-  // already ISO
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-
-  // dd-mm-yyyy or dd/mm/yyyy
-  const m = dateStr.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
-  if (m) {
-    const [, d, mo, y] = m;
-    return `${y}-${mo}-${d}`;
-  }
-
-  // try to parse yyyy/mm/dd
-  const m2 = dateStr.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
-  if (m2) {
-    const [, y, mo, d] = m2;
-    return `${y}-${mo}-${d}`;
-  }
-
-  // fallback: return original (so we don't drop data)
-  return dateStr;
-}
-
-// Fungsi retry jika gagal
+// 🔹 Fungsi retry jika gagal
 async function retry(fn, retries = 3, delayMs = 400) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -76,7 +29,7 @@ async function retry(fn, retries = 3, delayMs = 400) {
   throw new Error("Max retries reached");
 }
 
-// Ambil detail faktur
+// 🔹 Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -99,8 +52,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       d.detailTax?.[0]?.tax?.description ||
       "NON-PAJAK";
 
-    if (typeof rawType !== "string") rawType = String(rawType);
-    const typePajak = rawType
+    const typePajak = String(rawType)
       .replace(/PAJAK\s*/i, "")
       .trim()
       .toLowerCase()
@@ -135,25 +87,14 @@ export default async function handler(req, res) {
   const host = process.env.ACCURATE_HOST;
   const { start_date, end_date, per_page = 10000 } = req.query || {};
 
-  // Prepare filter params — Accurate expects DD/MM/YYYY
+  // 🔹 Filter kirim ke Accurate dalam format DD/MM/YYYY
   const filterParams = {};
   if (start_date && end_date) {
-    const s = normalizeFilterToAccurate(start_date);
-    const e = normalizeFilterToAccurate(end_date);
-
-    if (!s || !e) {
-      return res.status(400).json({
-        error:
-          "Format tanggal filter tidak valid. Terima: YYYY-MM-DD atau DD-MM-YYYY atau DD/MM/YYYY",
-      });
-    }
-
     filterParams["filter.transDate.op"] = "BETWEEN";
-    filterParams["filter.transDate.val[0]"] = s; // DD/MM/YYYY
-    filterParams["filter.transDate.val[1]"] = e; // DD/MM/YYYY
+    filterParams["filter.transDate.val[0]"] = convertToDMY(start_date);
+    filterParams["filter.transDate.val[1]"] = convertToDMY(end_date);
   }
-
-  if (per_page) filterParams["sp.pageSize"] = Number(per_page) || 10000;
+  if (per_page) filterParams["sp.pageSize"] = per_page;
 
   try {
     const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
@@ -185,10 +126,13 @@ export default async function handler(req, res) {
               item.id
             );
 
+            // 🔹 Convert tanggal dari DD-MM-YYYY → YYYY-MM-DD
+            const fixedDate = convertToYMD(item.transDate);
+
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: normalizeAccurateDateToISO(item.transDate), // -> YYYY-MM-DD
+              tanggal: fixedDate, // ✅ sekarang hasil akhir YYYY-MM-DD
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
@@ -199,10 +143,11 @@ export default async function handler(req, res) {
             };
           } catch (err) {
             console.warn(`❌ Detail gagal (ID ${item.id}):`, err.message);
+            const fixedDate = convertToYMD(item.transDate);
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: normalizeAccurateDateToISO(item.transDate),
+              tanggal: fixedDate,
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
