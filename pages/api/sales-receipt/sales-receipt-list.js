@@ -1,9 +1,16 @@
 import axios from "axios";
 
+// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (hanya untuk filter)
+function convertToDMY(dateStr) {
+  if (!dateStr) return null;
+  const [year, month, day] = dateStr.split("-");
+  return `${day}/${month}/${year}`;
+}
+
 // Delay helper (ms)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Fungsi retry jika gagal
+// 🔹 Fungsi retry jika gagal
 async function retry(fn, retries = 3, delayMs = 400) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -18,22 +25,19 @@ async function retry(fn, retries = 3, delayMs = 400) {
 // 🔹 Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
-    const res = await axios.get(
-      `${host}/accurate/api/sales-invoice/detail.do`,
-      {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-          "X-Session-ID": session_id,
-        },
-        params: { id },
-        timeout: 10000,
-      }
-    );
+    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        "X-Session-ID": session_id,
+      },
+      params: { id },
+      timeout: 10000,
+    });
 
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
 
-    // Normalisasi type pajak biar bersih dan konsisten
+    // Normalisasi type pajak
     let rawType =
       d.searchCharField1?.name ||
       d.searchCharField1 ||
@@ -41,12 +45,11 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       d.detailTax?.[0]?.tax?.description ||
       "NON-PAJAK";
 
-    if (typeof rawType !== "string") rawType = String(rawType);
-    const typePajak = rawType
+    const typePajak = String(rawType)
       .replace(/PAJAK\s*/i, "")
       .trim()
       .toLowerCase()
-      .replace(/\b\w/g, (c) => c.toUpperCase()); // hapus awalan “PAJAK ”
+      .replace(/\b\w/g, (c) => c.toUpperCase());
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -75,8 +78,9 @@ export default async function handler(req, res) {
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, per_page = 10000 } = req.body || {};
+  const { start_date, end_date, per_page = 10000 } = req.query || {};
 
+  // 🔹 Filter tetap pakai DD/MM/YYYY
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
@@ -86,25 +90,22 @@ export default async function handler(req, res) {
   if (per_page) filterParams["sp.pageSize"] = per_page;
 
   try {
-    const response = await axios.get(
-      `${host}/accurate/api/sales-invoice/list.do`,
-      {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-          "X-Session-ID": session_id,
-        },
-        params: {
-          fields:
-            "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
-          "sp.sort": "transDate|desc",
-          ...filterParams,
-        },
-      }
-    );
+    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        "X-Session-ID": session_id,
+      },
+      params: {
+        fields:
+          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
+        "sp.sort": "transDate|desc",
+        ...filterParams,
+      },
+    });
 
     const list = response.data?.d || [];
     const result = [];
-    const batchSize = 5; // 🔹 maksimal 5 request paralel biar aman
+    const batchSize = 5; // maksimal 5 request paralel biar aman
 
     for (let i = 0; i < list.length; i += batchSize) {
       const batch = list.slice(i, i + batchSize);
@@ -121,14 +122,14 @@ export default async function handler(req, res) {
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: item.transDate,
+              tanggal: item.transDate, // ✅ ambil langsung dari Accurate (YYYY-MM-DD)
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              total: formatID(item.totalAmount),
-              typePajak: taxDetail.typePajak, // ← sekarang pasti string: “Hotel” / “Resto”
-              omzet: formatID(taxDetail.dppAmount),
-              nilaiPPN: formatID(taxDetail.tax1Amount),
+              total: Number(item.totalAmount) || 0, // ✅ angka mentah
+              typePajak: taxDetail.typePajak,
+              omzet: Number(taxDetail.dppAmount) || 0, // ✅ angka mentah
+              nilaiPPN: Number(taxDetail.tax1Amount) || 0, // ✅ angka mentah
             };
           } catch (err) {
             console.warn(`❌ Detail gagal (ID ${item.id}):`, err.message);
@@ -140,17 +141,17 @@ export default async function handler(req, res) {
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
               umur: item.age || 0,
-              total: formatID(item.totalAmount),
+              total: Number(item.totalAmount) || 0,
               typePajak: "NON-PAJAK",
-              omzet: "0",
-              nilaiPPN: "0",
+              omzet: 0,
+              nilaiPPN: 0,
             };
           }
         })
       );
 
       result.push(...batchResults);
-      await delay(700); // jeda antar batch
+      await delay(700);
     }
 
     return res.status(200).json({
