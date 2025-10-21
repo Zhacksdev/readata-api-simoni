@@ -1,17 +1,10 @@
 import axios from "axios";
 
-// 🔹 Ubah format tanggal YYYY-MM-DD → DD/MM/YYYY (untuk filter ke Accurate)
+// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (hanya untuk filter)
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
   return `${day}/${month}/${year}`;
-}
-
-// 🔹 Ubah format tanggal DD-MM-YYYY → YYYY-MM-DD (untuk response dari Accurate)
-function convertToYMD(dateStr) {
-  if (!dateStr) return dateStr;
-  const [day, month, year] = dateStr.split("-");
-  return `${year}-${month}-${day}`;
 }
 
 // Delay helper (ms)
@@ -87,7 +80,7 @@ export default async function handler(req, res) {
   const host = process.env.ACCURATE_HOST;
   const { start_date, end_date, per_page = 10000 } = req.query || {};
 
-  // 🔹 Filter kirim ke Accurate dalam format DD/MM/YYYY
+  // 🔹 Filter tetap pakai DD/MM/YYYY
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
@@ -126,28 +119,24 @@ export default async function handler(req, res) {
               item.id
             );
 
-            // 🔹 Convert tanggal dari DD-MM-YYYY → YYYY-MM-DD
-            const fixedDate = convertToYMD(item.transDate);
-
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: fixedDate, // ✅ sekarang hasil akhir YYYY-MM-DD
+              tanggal: item.transDate, // ✅ ambil langsung dari Accurate (YYYY-MM-DD)
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              total: Number(item.totalAmount) || 0,
+              total: Number(item.totalAmount) || 0, // ✅ angka mentah
               typePajak: taxDetail.typePajak,
-              omzet: Number(taxDetail.dppAmount) || 0,
-              nilaiPPN: Number(taxDetail.tax1Amount) || 0,
+              omzet: Number(taxDetail.dppAmount) || 0, // ✅ angka mentah
+              nilaiPPN: Number(taxDetail.tax1Amount) || 0, // ✅ angka mentah
             };
           } catch (err) {
             console.warn(`❌ Detail gagal (ID ${item.id}):`, err.message);
-            const fixedDate = convertToYMD(item.transDate);
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: fixedDate,
+              tanggal: item.transDate,
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
