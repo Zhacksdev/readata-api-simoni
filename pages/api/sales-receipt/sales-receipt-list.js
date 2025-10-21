@@ -1,11 +1,70 @@
 import axios from "axios";
 
-// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (hanya untuk filter)
-
 // Delay helper (ms)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 🔹 Fungsi retry jika gagal
+// Konversi dari YYYY-MM-DD -> DD/MM/YYYY (untuk filter Accurate)
+function convertToDMYFromISO(dateStr) {
+  if (!dateStr) return null;
+  // expect YYYY-MM-DD
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  return `${d}/${mo}/${y}`;
+}
+
+// Normalisasi input filter date (terima YYYY-MM-DD atau DD-MM-YYYY atau DD/MM/YYYY)
+// Return string DD/MM/YYYY (suitable for Accurate filter) or null
+function normalizeFilterToAccurate(dateStr) {
+  if (!dateStr) return null;
+
+  // already in YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return convertToDMYFromISO(dateStr);
+  }
+
+  // dd-mm-yyyy or dd/mm/yyyy -> convert to dd/mm/yyyy
+  if (/^\d{2}[\/-]\d{2}[\/-]\d{4}$/.test(dateStr)) {
+    return dateStr.replace(/-/g, "/");
+  }
+
+  // try to guess yyyy/mm/dd
+  const alt = dateStr.replace(/\s+/g, "");
+  if (/^\d{4}[\/-]\d{2}[\/-]\d{2}$/.test(alt)) {
+    return convertToDMYFromISO(alt.replace(/\//g, "-"));
+  }
+
+  // unknown format -> return null
+  return null;
+}
+
+// Normalisasi tanggal dari Accurate (terima "dd-mm-yyyy", "dd/mm/yyyy", atau "yyyy-mm-dd")
+// Return YYYY-MM-DD
+function normalizeAccurateDateToISO(dateStr) {
+  if (!dateStr) return null;
+
+  // already ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+  // dd-mm-yyyy or dd/mm/yyyy
+  const m = dateStr.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    return `${y}-${mo}-${d}`;
+  }
+
+  // try to parse yyyy/mm/dd
+  const m2 = dateStr.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+  if (m2) {
+    const [, y, mo, d] = m2;
+    return `${y}-${mo}-${d}`;
+  }
+
+  // fallback: return original (so we don't drop data)
+  return dateStr;
+}
+
+// Fungsi retry jika gagal
 async function retry(fn, retries = 3, delayMs = 400) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -17,7 +76,7 @@ async function retry(fn, retries = 3, delayMs = 400) {
   throw new Error("Max retries reached");
 }
 
-// 🔹 Ambil detail faktur
+// Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -40,7 +99,8 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       d.detailTax?.[0]?.tax?.description ||
       "NON-PAJAK";
 
-    const typePajak = String(rawType)
+    if (typeof rawType !== "string") rawType = String(rawType);
+    const typePajak = rawType
       .replace(/PAJAK\s*/i, "")
       .trim()
       .toLowerCase()
@@ -75,12 +135,25 @@ export default async function handler(req, res) {
   const host = process.env.ACCURATE_HOST;
   const { start_date, end_date, per_page = 10000 } = req.query || {};
 
-  // 🔹 Filter tetap pakai DD/MM/YYYY
+  // Prepare filter params — Accurate expects DD/MM/YYYY
   const filterParams = {};
   if (start_date && end_date) {
+    const s = normalizeFilterToAccurate(start_date);
+    const e = normalizeFilterToAccurate(end_date);
+
+    if (!s || !e) {
+      return res.status(400).json({
+        error:
+          "Format tanggal filter tidak valid. Terima: YYYY-MM-DD atau DD-MM-YYYY atau DD/MM/YYYY",
+      });
+    }
+
     filterParams["filter.transDate.op"] = "BETWEEN";
+    filterParams["filter.transDate.val[0]"] = s; // DD/MM/YYYY
+    filterParams["filter.transDate.val[1]"] = e; // DD/MM/YYYY
   }
-  if (per_page) filterParams["sp.pageSize"] = per_page;
+
+  if (per_page) filterParams["sp.pageSize"] = Number(per_page) || 10000;
 
   try {
     const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
@@ -115,21 +188,21 @@ export default async function handler(req, res) {
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: item.transDate, // ✅ ambil langsung dari Accurate (YYYY-MM-DD)
+              tanggal: normalizeAccurateDateToISO(item.transDate), // -> YYYY-MM-DD
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              total: Number(item.totalAmount) || 0, // ✅ angka mentah
+              total: Number(item.totalAmount) || 0,
               typePajak: taxDetail.typePajak,
-              omzet: Number(taxDetail.dppAmount) || 0, // ✅ angka mentah
-              nilaiPPN: Number(taxDetail.tax1Amount) || 0, // ✅ angka mentah
+              omzet: Number(taxDetail.dppAmount) || 0,
+              nilaiPPN: Number(taxDetail.tax1Amount) || 0,
             };
           } catch (err) {
             console.warn(`❌ Detail gagal (ID ${item.id}):`, err.message);
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: item.transDate,
+              tanggal: normalizeAccurateDateToISO(item.transDate),
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
