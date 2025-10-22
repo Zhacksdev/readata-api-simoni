@@ -80,7 +80,7 @@ export default async function handler(req, res) {
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, page = 1, per_page = 10 } = req.query || {};
+  const { start_date, end_date, page = 1, per_page = 1000 } = req.query || {};
 
   // 🔹 Filter pakai YYYY-MM-DD dari client → ubah ke DD/MM/YYYY untuk Accurate
   const filterParams = {};
