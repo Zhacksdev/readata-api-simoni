@@ -7,11 +7,10 @@ function convertToDMY(dateStr) {
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Konversi tanggal DD-MM-YYYY → YYYY-MM-DD (buat response)
-function convertToYMD(dateStr) {
-  if (!dateStr) return null;
-  const [day, month, year] = dateStr.split("/");
-  return `${year}-${month}-${day}`;
+// 🔹 Format angka ke format Indonesia
+function formatID(num) {
+  if (isNaN(num)) return "0";
+  return Number(num).toLocaleString("id-ID");
 }
 
 // 🔹 Delay helper
@@ -44,7 +43,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
     const d = res.data?.d;
     if (!d) throw new Error("Empty response");
 
-    // Normalisasi type pajak
+    // Normalisasi type pajak biar konsisten
     let rawType =
       d.searchCharField1?.name ||
       d.searchCharField1 ||
@@ -74,15 +73,17 @@ export default async function handler(req, res) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Access token tidak ditemukan di Header" });
+    return res
+      .status(401)
+      .json({ error: "Access token tidak ditemukan di Header" });
   }
 
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, page = 1, per_page = 1000 } = req.query || {};
+  const { start_date, end_date, page = 1, per_page = 10 } = req.body || {};
 
-  // 🔹 Filter pakai YYYY-MM-DD dari client → ubah ke DD/MM/YYYY untuk Accurate
+  // 🔹 Filter tanggal (YYYY-MM-DD → DD/MM/YYYY)
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
@@ -99,10 +100,10 @@ export default async function handler(req, res) {
       params: {
         fields:
           "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
-        "sp.pageSize": 10000,
+        "sp.pageSize": 10000, // ambil semua data dulu
         "sp.sort": "transDate|desc",
         ...filterParams,
-        _: Date.now(),
+        _: Date.now(), // cegah cache
       },
     });
 
@@ -110,6 +111,7 @@ export default async function handler(req, res) {
     const result = [];
     const batchSize = 5;
 
+    // 🔹 Loop dan ambil detail pajak
     for (let i = 0; i < list.length; i += batchSize) {
       const batch = list.slice(i, i + batchSize);
       const batchResults = await Promise.all(
@@ -122,20 +124,17 @@ export default async function handler(req, res) {
               item.id
             );
 
-            // Ubah tanggal dari DD-MM-YYYY ke YYYY-MM-DD
-            const tanggalNormalized = convertToYMD(item.transDate);
-
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: tanggalNormalized, // ✅ format YYYY-MM-DD
+              tanggal: item.transDate, // biarkan format original Accurate
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              total: Number(item.totalAmount) || 0, // ✅ angka mentah
+              total: formatID(item.totalAmount), // format angka Indonesia
               typePajak: taxDetail.typePajak || "-",
-              omzet: Number(taxDetail.dppAmount) || 0, // ✅ angka mentah
-              nilaiPPN: Number(taxDetail.tax1Amount) || 0, // ✅ angka mentah
+              omzet: formatID(taxDetail.dppAmount),
+              nilaiPPN: formatID(taxDetail.tax1Amount),
             };
           } catch {
             return null;
@@ -147,9 +146,9 @@ export default async function handler(req, res) {
       await delay(700);
     }
 
-    // 🔹 Pagination
+    // 🔹 Pagination setelah semua data diproses
     const start = (page - 1) * per_page;
-    const end = start + Number(per_page);
+    const end = start + per_page;
     const paginated = result.slice(start, end);
 
     return res.status(200).json({
