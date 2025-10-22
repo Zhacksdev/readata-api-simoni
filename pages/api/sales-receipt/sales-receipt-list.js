@@ -10,7 +10,7 @@ function convertToDMY(dateStr) {
 // 🔹 Konversi tanggal DD-MM-YYYY → YYYY-MM-DD (buat response)
 function convertToYMD(dateStr) {
   if (!dateStr) return null;
-  const [day, month, year] = dateStr.split("-");
+  const [day, month, year] = dateStr.split("/");
   return `${year}-${month}-${day}`;
 }
 
