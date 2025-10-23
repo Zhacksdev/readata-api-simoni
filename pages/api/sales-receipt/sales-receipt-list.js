@@ -155,6 +155,8 @@ export default async function handler(req, res) {
       per_page: Number(perPage),
       total_data,
       total_page,
+      next_page: page < total_page ? Number(page) + 1 : null,
+      prev_page: page > 1 ? Number(page) - 1 : null,
       orders: results,
     });
 
