@@ -1,22 +1,21 @@
 import axios from "axios";
 
-// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY
+// Convert DD/MM/YYYY → YYYY-MM-DD (output)
+function convertToYMD(dateStr) {
+  if (!dateStr) return null;
+  const [day, month, year] = dateStr.split("/");
+  return `${year}-${month}-${day}`;
+}
+
+// Convert YYYY-MM-DD → DD/MM/YYYY (filter Accurate)
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Format angka ke format Indonesia
-function formatID(num) {
-  if (isNaN(num)) return "0";
-  return Number(num).toLocaleString("id-ID");
-}
-
-// 🔹 Delay helper
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 🔹 Retry helper
 async function retry(fn, retries = 3, delayMs = 400) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -28,22 +27,21 @@ async function retry(fn, retries = 3, delayMs = 400) {
   throw new Error("Max retries reached");
 }
 
-// 🔹 Ambil detail faktur
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
-    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: { id },
-      timeout: 10000,
-    });
+    const res = await axios.get(
+      `${host}/accurate/api/sales-invoice/detail.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: { id },
+      }
+    );
 
-    const d = res.data?.d;
-    if (!d) throw new Error("Empty response");
+    const d = res.data?.d || {};
 
-    // Normalisasi type pajak biar konsisten
     let rawType =
       d.searchCharField1?.name ||
       d.searchCharField1 ||
@@ -52,10 +50,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       "NON-PAJAK";
 
     if (typeof rawType !== "string") rawType = String(rawType);
-    const typePajak = rawType
-      .replace(/PAJAK\s*/i, "")
-      .trim()
-      .toLowerCase();
+    const typePajak = rawType.replace(/PAJAK\s*/i, "").trim().toLowerCase();
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -63,7 +58,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       Number(d.detailTax?.[0]?.taxableAmount) ||
       0;
 
-    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1) || 0;
+    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1);
 
     return { typePajak, dppAmount, tax1Amount };
   });
@@ -76,17 +71,17 @@ export default async function handler(req, res) {
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
-    return res
-      .status(401)
-      .json({ error: "Access token tidak ditemukan di Header" });
+    return res.status(401).json({ error: "Access token tidak ditemukan" });
   }
 
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, page = 1, per_page = 10 } = req.body || {};
 
-  // Ambil SEMUA data dari Accurate dulu (biar filter gak kehilangan data)
+  const { start_date, end_date, page = 1, per_page = 100 } = req.body || {};
+
+  const perPage = Math.min(Number(per_page), 1000);
+
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
@@ -95,82 +90,73 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: {
-        fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,age,totalAmount",
-        "sp.pageSize": 10000, // 🔹 ambil semua dulu
-        "sp.sort": "transDate|desc",
-        ...filterParams,
-        _: Date.now(), // cegah cache Accurate
-      },
-    });
+    const response = await axios.get(
+      `${host}/accurate/api/sales-invoice/list.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: {
+          fields:
+            "id,number,transDate,customer,description,statusName,statusOutstanding,totalAmount",
+          "sp.page": Number(page),
+          "sp.pageSize": Number(perPage),
+          "sp.sort": "transDate|desc",
+          ...filterParams,
+          _: Date.now(),
+        },
+      }
+    );
 
     const list = response.data?.d || [];
-    const result = [];
+    const total_data = response.data?.sp?.totalRows || list.length;
+    const total_page = Math.ceil(total_data / perPage);
+
+    const results = [];
     const batchSize = 5;
 
     for (let i = 0; i < list.length; i += batchSize) {
       const batch = list.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
+      const detailBatch = await Promise.all(
         batch.map(async (item) => {
-          try {
-            const taxDetail = await fetchInvoiceTaxDetail(
-              host,
-              access_token,
-              session_id,
-              item.id
-            );
+          const detail = await fetchInvoiceTaxDetail(
+            host,
+            access_token,
+            session_id,
+            item.id
+          );
 
-            // ✅ hanya ambil pajak yang mengandung kata "hotel"
-            const isHotel =
-              taxDetail.typePajak.includes("hotel") ||
-              taxDetail.typePajak.includes("hotel pajak");
+          if (!detail.typePajak.includes("hotel")) return null;
 
-            if (!isHotel) return null;
-
-            return {
-              id: item.id,
-              nomor: item.number,
-              tanggal: item.transDate,
-              pelanggan: item.customer?.name || "-",
-              deskripsi: item.description || "-",
-              status: item.statusName || item.statusOutstanding || "-",
-              total: formatID(item.totalAmount),
-              typePajak: "Hotel",
-              omzet: formatID(taxDetail.dppAmount),
-              nilaiPPN: formatID(taxDetail.tax1Amount),
-            };
-          } catch {
-            return null;
-          }
+          return {
+            id: item.id,
+            nomor: item.number,
+            tanggal: convertToYMD(item.transDate),
+            pelanggan: item.customer?.name || "-",
+            deskripsi: item.description || "-",
+            status: item.statusName || item.statusOutstanding || "-",
+            total: Number(item.totalAmount),
+            typePajak: "Hotel",
+            omzet: Number(detail.dppAmount),
+            nilaiPPN: Number(detail.tax1Amount),
+          };
         })
       );
 
-      result.push(...batchResults.filter(Boolean));
-      await delay(700);
+      results.push(...detailBatch.filter(Boolean));
+      await delay(400);
     }
-
-    // 🔹 Pagination setelah filter
-    const start = (page - 1) * per_page;
-    const end = start + per_page;
-    const paginated = result.slice(start, end);
 
     return res.status(200).json({
       success: true,
-      total_data: result.length,
+      total_data,
+      total_page,
       page: Number(page),
-      per_page: Number(per_page),
-      orders: paginated,
+      per_page: perPage,
+      orders: results,
     });
-  } catch (error) {
-    console.error("💥 ERROR API:", error.response?.data || error.message);
-    return res.status(error.response?.status || 500).json({
-      error: error.response?.data || "Gagal mengambil data faktur Hotel",
-    });
+  } catch (err) {
+    return res.status(500).json({ error: "Gagal ambil data Hotel" });
   }
 }
