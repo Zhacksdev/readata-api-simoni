@@ -159,7 +159,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      total_data,
       page: Number(page),
       per_page: Number(perPage),
       orders: results,
