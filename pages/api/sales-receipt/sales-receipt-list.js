@@ -1,13 +1,13 @@
 import axios from "axios";
 
-// 🔹 Konversi tanggal DD/MM/YYYY → YYYY-MM-DD (untuk output ke user)
+// 🔹 Convert tanggal DD/MM/YYYY → YYYY-MM-DD (output)
 function convertToYMD(dateStr) {
   if (!dateStr) return null;
   const [day, month, year] = dateStr.split("/");
   return `${year}-${month}-${day}`;
 }
 
-// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (filter Accurate)
+// 🔹 Convert tanggal YYYY-MM-DD → DD/MM/YYYY (filter ke Accurate)
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
@@ -37,7 +37,7 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       params: { id },
     });
 
-    const d = res.data?.d;
+    const d = res.data?.d || {};
 
     let rawType =
       d.searchCharField1?.name ||
@@ -75,15 +75,10 @@ export default async function handler(req, res) {
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
 
-  const {
-    start_date,
-    end_date,
-    page = 1,
-    per_page = 100,
-  } = req.query || {};
+  const { start_date, end_date, page = 1, per_page = 100 } = req.query;
 
-  // ✅ per_page tidak boleh lebih besar dari 1000 (ketentuan Accurate)
-  const perPage = per_page > 1000 ? 1000 : per_page;
+  // ✅ batas per_page Accurate max 1000
+  const perPage = Math.min(Number(per_page), 1000);
 
   const filterParams = {};
   if (start_date && end_date) {
@@ -114,8 +109,8 @@ export default async function handler(req, res) {
     const total_page = Math.ceil(total_data / perPage);
 
     const results = [];
-
     const batchSize = 5;
+
     for (let i = 0; i < list.length; i += batchSize) {
       const chunk = list.slice(i, i + batchSize);
       const detailChunk = await Promise.all(
@@ -131,11 +126,11 @@ export default async function handler(req, res) {
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: convertToYMD(item.transDate),
+              tanggal: convertToYMD(item.transDate), // ✅ Output YYYY-MM-DD
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              total: Number(item.totalAmount), // ✅ angka asli Accurate
+              total: Number(item.totalAmount),
               typePajak: taxDetail.typePajak,
               omzet: Number(taxDetail.dppAmount),
               nilaiPPN: Number(taxDetail.tax1Amount),
@@ -145,14 +140,16 @@ export default async function handler(req, res) {
           }
         })
       );
+
       results.push(...detailChunk.filter(Boolean));
       await delay(400);
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       page: Number(page),
       per_page: Number(perPage),
+      total_page,
       total_data,
       orders: results,
     });
