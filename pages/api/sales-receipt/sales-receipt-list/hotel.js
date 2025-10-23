@@ -151,9 +151,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       total_data,
-      total_page,
       page: Number(page),
-      per_page: perPage,
+      per_page: Number(perPage),
       orders: results,
     });
   } catch (err) {
