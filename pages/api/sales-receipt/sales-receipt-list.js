@@ -75,7 +75,7 @@ export default async function handler(req, res) {
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
 
-  const { start_date, end_date, page = 1, per_page = 100 } = req.query;
+  const { start_date, end_date, page = 1, per_page = 100 } = req.body;
 
   // ✅ batas per_page Accurate max 1000
   const perPage = Math.min(Number(per_page), 1000);
