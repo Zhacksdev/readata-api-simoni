@@ -29,13 +29,16 @@ async function retry(fn, retries = 3, delayMs = 400) {
 
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
-    const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: { id },
-    });
+    const res = await axios.get(
+      `${host}/accurate/api/sales-invoice/detail.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: { id },
+      }
+    );
 
     const d = res.data?.d || {};
 
@@ -47,7 +50,10 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       "NON-PAJAK";
 
     if (typeof rawType !== "string") rawType = String(rawType);
-    const typePajak = rawType.replace(/PAJAK\s*/i, "").trim().toLowerCase();
+    const typePajak = rawType
+      .replace(/PAJAK\s*/i, "")
+      .trim()
+      .toLowerCase();
 
     const dppAmount =
       Number(d.taxableAmount1) ||
@@ -88,21 +94,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "X-Session-ID": session_id,
-      },
-      params: {
-        fields:
-          "id,number,transDate,customer,description,statusName,statusOutstanding,totalAmount",
-        "sp.page": Number(page),
-        "sp.pageSize": Number(perPage),
-        "sp.sort": "transDate|desc",
-        ...filterParams,
-        _: Date.now(),
-      },
-    });
+    const response = await axios.get(
+      `${host}/accurate/api/sales-invoice/list.do`,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "X-Session-ID": session_id,
+        },
+        params: {
+          fields:
+            "id,number,transDate,customer,description,statusName,statusOutstanding,totalAmount",
+          "sp.page": Number(page),
+          "sp.pageSize": Number(perPage),
+          "sp.sort": "transDate|desc",
+          ...filterParams,
+          _: Date.now(),
+        },
+      }
+    );
 
     const list = response.data?.d || [];
     const total_data = response.data?.sp?.totalRows || list.length;
@@ -147,13 +156,11 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
+      total_data,
       page: Number(page),
       per_page: Number(perPage),
-      total_page,
-      total_data,
       orders: results,
     });
-
   } catch (err) {
     console.error("API Error:", err.message);
     return res.status(500).json({ error: "Gagal ambil data" });
