@@ -1,23 +1,21 @@
 import axios from "axios";
 
-// 🔹 Konversi tanggal DD/MM/YYYY → YYYY-MM-DD (response)
+// 🔹 Konversi tanggal DD/MM/YYYY → YYYY-MM-DD (untuk output ke user)
 function convertToYMD(dateStr) {
   if (!dateStr) return null;
   const [day, month, year] = dateStr.split("/");
   return `${year}-${month}-${day}`;
 }
 
-// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (filter)
+// 🔹 Konversi tanggal YYYY-MM-DD → DD/MM/YYYY (filter Accurate)
 function convertToDMY(dateStr) {
   if (!dateStr) return null;
   const [year, month, day] = dateStr.split("-");
   return `${day}/${month}/${year}`;
 }
 
-// 🔹 Delay
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 🔹 Retry Helper
 async function retry(fn, retries = 3, delayMs = 400) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -29,7 +27,6 @@ async function retry(fn, retries = 3, delayMs = 400) {
   throw new Error("Max retries reached");
 }
 
-// 🔹 Ambil detail pajak invoice
 async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
   return retry(async () => {
     const res = await axios.get(`${host}/accurate/api/sales-invoice/detail.do`, {
@@ -38,11 +35,9 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
         "X-Session-ID": session_id,
       },
       params: { id },
-      timeout: 10000,
     });
 
     const d = res.data?.d;
-    if (!d) throw new Error("Empty response");
 
     let rawType =
       d.searchCharField1?.name ||
@@ -60,31 +55,36 @@ async function fetchInvoiceTaxDetail(host, access_token, session_id, id) {
       Number(d.detailTax?.[0]?.taxableAmount) ||
       0;
 
-    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1) || 0;
+    const tax1Amount = Number(d.tax1Amount) || Math.round(dppAmount * 0.1);
 
     return { typePajak, dppAmount, tax1Amount };
   });
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Gunakan metode POST" });
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Gunakan metode GET" });
   }
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Access token tidak ditemukan di Header" });
+    return res.status(401).json({ error: "Access token tidak ditemukan" });
   }
 
   const access_token = authHeader.split(" ")[1];
   const session_id = process.env.ACCURATE_SESSION_ID;
   const host = process.env.ACCURATE_HOST;
-  const { start_date, end_date, page = 1, per_page = 100 } = req.body || {};
 
-  // ✅ Limit per page maksimal 1000 sesuai aturan Accurate
+  const {
+    start_date,
+    end_date,
+    page = 1,
+    per_page = 100,
+  } = req.query || {};
+
+  // ✅ per_page tidak boleh lebih besar dari 1000 (ketentuan Accurate)
   const perPage = per_page > 1000 ? 1000 : per_page;
 
-  // 🔹 Filter tanggal
   const filterParams = {};
   if (start_date && end_date) {
     filterParams["filter.transDate.op"] = "BETWEEN";
@@ -93,7 +93,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ Ambil data halaman yang diminta langsung dari Accurate
     const response = await axios.get(`${host}/accurate/api/sales-invoice/list.do`, {
       headers: {
         Authorization: `Bearer ${access_token}`,
@@ -102,8 +101,8 @@ export default async function handler(req, res) {
       params: {
         fields:
           "id,number,transDate,customer,description,statusName,statusOutstanding,totalAmount",
-        "sp.page": page,
-        "sp.pageSize": perPage,
+        "sp.page": Number(page),
+        "sp.pageSize": Number(perPage),
         "sp.sort": "transDate|desc",
         ...filterParams,
         _: Date.now(),
@@ -114,14 +113,13 @@ export default async function handler(req, res) {
     const total_data = response.data?.sp?.totalRows || list.length;
     const total_page = Math.ceil(total_data / perPage);
 
-    const result = [];
+    const results = [];
+
     const batchSize = 5;
-
     for (let i = 0; i < list.length; i += batchSize) {
-      const batch = list.slice(i, i + batchSize);
-
-      const batchResults = await Promise.all(
-        batch.map(async (item) => {
+      const chunk = list.slice(i, i + batchSize);
+      const detailChunk = await Promise.all(
+        chunk.map(async (item) => {
           try {
             const taxDetail = await fetchInvoiceTaxDetail(
               host,
@@ -133,12 +131,12 @@ export default async function handler(req, res) {
             return {
               id: item.id,
               nomor: item.number,
-              tanggal: convertToYMD(item.transDate), // ✅ sudah YYYY-MM-DD
+              tanggal: convertToYMD(item.transDate),
               pelanggan: item.customer?.name || "-",
               deskripsi: item.description || "-",
               status: item.statusName || item.statusOutstanding || "-",
-              total: Number(item.totalAmount), // ✅ angka asli dari Accurate
-              typePajak: taxDetail.typePajak || "-",
+              total: Number(item.totalAmount), // ✅ angka asli Accurate
+              typePajak: taxDetail.typePajak,
               omzet: Number(taxDetail.dppAmount),
               nilaiPPN: Number(taxDetail.tax1Amount),
             };
@@ -147,26 +145,23 @@ export default async function handler(req, res) {
           }
         })
       );
-
-      result.push(...batchResults.filter(Boolean));
-      await delay(500);
+      results.push(...detailChunk.filter(Boolean));
+      await delay(400);
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      page: +page,
-      per_page: perPage,
+      page: Number(page),
+      per_page: Number(perPage),
       total_data,
       total_page,
-      next_page: page < total_page ? page + 1 : null,
-      prev_page: page > 1 ? page - 1 : null,
-      orders: result,
+      next_page: page < total_page ? Number(page) + 1 : null,
+      prev_page: page > 1 ? Number(page) - 1 : null,
+      orders: results,
     });
 
-  } catch (error) {
-    console.error("💥 API ERROR:", error.response?.data || error.message);
-    return res.status(error.response?.status || 500).json({
-      error: error.response?.data || "Gagal mengambil data faktur",
-    });
+  } catch (err) {
+    console.error("API Error:", err.message);
+    return res.status(500).json({ error: "Gagal ambil data" });
   }
 }
